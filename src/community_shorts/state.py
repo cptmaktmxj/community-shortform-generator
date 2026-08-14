@@ -94,6 +94,15 @@ class StateStore:
             ).fetchone()
         return int(row["count"] if row else 0)
 
+    def curated_ids(self) -> set[str]:
+        """Return item IDs already selected into the Stage 2 artifact."""
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT item_id FROM items WHERE curated_at IS NOT NULL"
+            ).fetchall()
+        return {str(row["item_id"]) for row in rows}
+
     def record_run(
         self,
         *,

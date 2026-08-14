@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 class StrictModel(BaseModel):
     """Base contract that rejects undeclared fields."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
 class Metrics(StrictModel):
