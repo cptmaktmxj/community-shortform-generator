@@ -70,6 +70,11 @@ class OneFailureLlm(FixtureLlmClient):
         return await super().assess(item)
 
 
+class AllFailureLlm(FixtureLlmClient):
+    async def assess(self, item):
+        raise ConnectionError("LLM endpoint unavailable")
+
+
 @pytest.mark.asyncio
 async def test_curate_isolates_one_llm_failure(tmp_path: Path) -> None:
     candidates = [make_candidate(index) for index in range(6)]
@@ -81,3 +86,15 @@ async def test_curate_isolates_one_llm_failure(tmp_path: Path) -> None:
     assert report.failed_item_ids == ["geeknews:5"]
     assert report.passed == 2
     assert len(store.read_curated()) == 2
+
+
+@pytest.mark.asyncio
+async def test_curate_fails_stage_when_every_llm_call_fails(tmp_path: Path) -> None:
+    candidates = [make_candidate(index) for index in range(3)]
+    store, state = prepare_state(tmp_path, candidates)
+    service = CurateService(store, state, AllFailureLlm())
+
+    with pytest.raises(RuntimeError, match="All LLM assessments failed"):
+        await service.run(NOW)
+
+    assert store.read_curated() == []

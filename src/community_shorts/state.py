@@ -2,9 +2,10 @@
 
 import json
 import sqlite3
+from contextlib import contextmanager
 from datetime import date, datetime
 from pathlib import Path
-from typing import Sequence
+from typing import Iterator, Sequence
 
 from community_shorts.models import RawItem
 
@@ -17,12 +18,17 @@ class StateStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
 
-    def _connect(self) -> sqlite3.Connection:
-        """Open a SQLite connection with rows exposed by column name."""
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        """Open, transact on, and always close a SQLite connection."""
 
         connection = sqlite3.connect(self.path)
         connection.row_factory = sqlite3.Row
-        return connection
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     def _initialize(self) -> None:
         """Create state tables when the database is first opened."""

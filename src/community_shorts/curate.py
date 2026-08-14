@@ -79,6 +79,9 @@ class CurateService:
                 failed_item_ids.append(candidate.raw.item_id)
                 LOGGER.exception("LLM assessment failed", extra={"item_id": candidate.raw.item_id})
 
+        if candidates and len(failed_item_ids) == len(candidates):
+            raise RuntimeError("All LLM assessments failed")
+
         assessed.sort(
             key=lambda entry: (-entry[2], -entry[0].reaction_score, entry[0].raw.item_id)
         )

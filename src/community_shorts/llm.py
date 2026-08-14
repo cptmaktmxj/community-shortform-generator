@@ -3,6 +3,7 @@
 import json
 from typing import Any, Protocol, Sequence
 
+import httpx
 from openai import AsyncOpenAI
 from pydantic import ValidationError
 
@@ -50,7 +51,8 @@ class OpenAiChatTransport:
         self._client = AsyncOpenAI(
             base_url=base_url,
             api_key=api_key,
-            timeout=timeout_seconds,
+            timeout=httpx.Timeout(timeout_seconds, connect=min(timeout_seconds, 5.0)),
+            max_retries=0,
         )
 
     async def complete(

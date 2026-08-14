@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+import community_shorts.llm as llm_module
 from community_shorts.llm import FixtureLlmClient, OpenAiLlmClient
 from community_shorts.models import RawItem
 from community_shorts.prefilter import ScoredRawItem
@@ -46,6 +47,25 @@ class SequencedChat:
         response = self.responses[self.calls]
         self.calls += 1
         return response
+
+
+def test_openai_transport_disables_sdk_retries_and_bounds_connect_timeout(monkeypatch) -> None:
+    captured = {}
+
+    class FakeAsyncOpenAI:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(llm_module, "AsyncOpenAI", FakeAsyncOpenAI)
+
+    llm_module.OpenAiChatTransport(
+        base_url="http://127.0.0.1:1/v1",
+        api_key="EMPTY",
+        timeout_seconds=120,
+    )
+
+    assert captured["max_retries"] == 0
+    assert captured["timeout"].connect == 5.0
 
 
 @pytest.mark.asyncio
