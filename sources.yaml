@@ -1,0 +1,70 @@
+sources:
+  - source_id: geeknews
+    adapter: geeknews
+    url: https://news.hada.io/new
+    language: ko
+    enabled: true
+    fetch_limit: 20
+    rate_limit_seconds: 1.0
+
+  - source_id: hackernews
+    adapter: hackernews
+    url: https://news.ycombinator.com/newest
+    language: en
+    enabled: false
+    fetch_limit: 30
+    rate_limit_seconds: 0.2
+
+  - source_id: reddit_hacking
+    adapter: reddit
+    url: https://www.reddit.com/r/hacking/
+    language: en
+    enabled: false
+    subreddit: hacking
+    fetch_limit: 25
+    rate_limit_seconds: 1.0
+
+  - source_id: reddit_ai_agents
+    adapter: reddit
+    url: https://www.reddit.com/r/AI_Agents/
+    language: en
+    enabled: false
+    subreddit: AI_Agents
+    fetch_limit: 25
+    rate_limit_seconds: 1.0
+
+  - source_id: reddit_openai
+    adapter: reddit
+    url: https://www.reddit.com/r/OpenAI/
+    language: en
+    enabled: false
+    subreddit: OpenAI
+    fetch_limit: 25
+    rate_limit_seconds: 1.0
+
+  - source_id: reddit_geminiai
+    adapter: reddit
+    url: https://www.reddit.com/r/GeminiAI/
+    language: en
+    enabled: false
+    subreddit: GeminiAI
+    fetch_limit: 25
+    rate_limit_seconds: 1.0
+
+  - source_id: reddit_claude
+    adapter: reddit
+    url: https://www.reddit.com/r/claude/
+    language: en
+    enabled: false
+    subreddit: claude
+    fetch_limit: 25
+    rate_limit_seconds: 1.0
+
+  - source_id: dcinside_singularity
+    adapter: dcinside
+    url: https://gall.dcinside.com/mgallery/board/lists/?id=thesingularity
+    language: ko
+    enabled: false
+    gallery_id: thesingularity
+    fetch_limit: 30
+    rate_limit_seconds: 2.0

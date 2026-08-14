@@ -1,1 +1,13 @@
 .worktrees/
+.env
+*.key
+credentials.json
+.venv/
+__pycache__/
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+data/*.json
+data/*.sqlite*
+*.log
