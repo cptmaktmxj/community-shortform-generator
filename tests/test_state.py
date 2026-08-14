@@ -54,3 +54,27 @@ def test_state_store_marks_safety_rejection_as_terminal(tmp_path: Path) -> None:
         "error": "actionable_cyber_abuse: 실행 가능한 공격 절차",
         "curated_at": None,
     }
+
+
+def test_replace_stage2_results_resets_old_terminal_states(tmp_path: Path) -> None:
+    """Catch a rebuilt artifact disagreeing with stale terminal SQLite states."""
+
+    state = StateStore(tmp_path / "state.sqlite")
+    items = [
+        make_item("geeknews:old"),
+        make_item("geeknews:new"),
+        make_item("geeknews:unsafe"),
+    ]
+    now = datetime(2026, 8, 14, 1, tzinfo=UTC)
+    state.mark_ingested(items, at=now)
+    state.mark_curated(["geeknews:old"], at=now)
+    state.mark_safety_rejected("geeknews:unsafe", at=now, reason="old")
+
+    state.replace_stage2_results(
+        curated_ids=["geeknews:new"],
+        safety_rejections={"geeknews:unsafe": "actionable_cyber_abuse: 새 판정"},
+        at=now,
+    )
+
+    assert state.curated_ids() == {"geeknews:new"}
+    assert state.stage2_terminal_ids() == {"geeknews:new", "geeknews:unsafe"}

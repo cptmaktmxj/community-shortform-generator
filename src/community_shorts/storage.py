@@ -46,6 +46,11 @@ class ArtifactStore:
         merged.update({item.item_id: item for item in items})
         self._write_models(self.curated_path, [merged[key] for key in sorted(merged)])
 
+    def replace_curated(self, items: Sequence[CuratedItem]) -> None:
+        """Atomically replace the complete Stage 2 artifact without merging."""
+
+        self._write_models(self.curated_path, sorted(items, key=lambda item: item.item_id))
+
     def _read_models(self, path: Path, model_type: type[ModelT]) -> list[ModelT]:
         """Validate a JSON array against the requested artifact model."""
 

@@ -5,7 +5,7 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import date, datetime
 from pathlib import Path
-from typing import Iterator, Sequence
+from typing import Iterator, Mapping, Sequence
 
 from community_shorts.models import RawItem
 
@@ -101,6 +101,40 @@ class StateStore:
                 WHERE item_id = ?
                 """,
                 (reason, item_id),
+            )
+
+    def replace_stage2_results(
+        self,
+        *,
+        curated_ids: Sequence[str],
+        safety_rejections: Mapping[str, str],
+        at: datetime,
+    ) -> None:
+        """Replace terminal Stage 2 states after a successful rebuild write."""
+
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE items
+                SET curated_at = NULL, status = 'ingested', error = NULL
+                WHERE curated_at IS NOT NULL OR status = 'safety_rejected'
+                """
+            )
+            connection.executemany(
+                """
+                UPDATE items
+                SET status = 'safety_rejected', error = ?
+                WHERE item_id = ?
+                """,
+                [(reason, item_id) for item_id, reason in safety_rejections.items()],
+            )
+            connection.executemany(
+                """
+                UPDATE items
+                SET curated_at = ?, status = 'curated', error = NULL
+                WHERE item_id = ?
+                """,
+                [(at.isoformat(), item_id) for item_id in curated_ids],
             )
 
     def count_curated_on(self, day: date) -> int:

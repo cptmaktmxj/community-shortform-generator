@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from community_shorts.curate import CurateService
+from community_shorts.curate import CurateService, RebuildIncompleteError
 from community_shorts.llm import FixtureLlmClient
 from community_shorts.models import LlmAssessment, Metrics, RawItem
 from community_shorts.state import StateStore
@@ -75,6 +75,15 @@ class AllFailureLlm(FixtureLlmClient):
         raise ConnectionError("LLM endpoint unavailable")
 
 
+class RecordingFixtureLlm(FixtureLlmClient):
+    def __init__(self) -> None:
+        self.seen_ids: list[str] = []
+
+    async def assess(self, item):
+        self.seen_ids.append(item.raw.item_id)
+        return await super().assess(item)
+
+
 @pytest.mark.asyncio
 async def test_curate_isolates_one_llm_failure(tmp_path: Path) -> None:
     candidates = [make_candidate(index) for index in range(6)]
@@ -98,6 +107,38 @@ async def test_curate_fails_stage_when_every_llm_call_fails(tmp_path: Path) -> N
         await service.run(NOW)
 
     assert store.read_curated() == []
+
+
+@pytest.mark.asyncio
+async def test_rebuild_reassesses_terminal_items_and_replaces_artifact(tmp_path: Path) -> None:
+    """Catch rebuild silently behaving like incremental curation."""
+
+    candidate = make_candidate(1)
+    store, state = prepare_state(tmp_path, [candidate])
+    await CurateService(store, state, FixtureLlmClient()).run(NOW)
+    llm = RecordingFixtureLlm()
+
+    report = await CurateService(store, state, llm).run(NOW, rebuild=True)
+
+    assert report.rebuilt is True
+    assert llm.seen_ids == [candidate.item_id]
+    assert [item.item_id for item in store.read_curated()] == [candidate.item_id]
+
+
+@pytest.mark.asyncio
+async def test_failed_rebuild_preserves_old_artifact_and_states(tmp_path: Path) -> None:
+    """Catch a partial rebuild destroying the last usable selection."""
+
+    candidate = make_candidate(1)
+    store, state = prepare_state(tmp_path, [candidate])
+    await CurateService(store, state, FixtureLlmClient()).run(NOW)
+    before = (tmp_path / "curated.json").read_bytes()
+
+    with pytest.raises(RebuildIncompleteError):
+        await CurateService(store, state, AllFailureLlm()).run(NOW, rebuild=True)
+
+    assert (tmp_path / "curated.json").read_bytes() == before
+    assert state.curated_ids() == {candidate.item_id}
 
 
 class RefusalLanguageLlm(FixtureLlmClient):

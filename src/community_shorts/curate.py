@@ -23,6 +23,11 @@ class CurateReport:
     passed: int
     safety_rejected: int
     failed_item_ids: list[str]
+    rebuilt: bool = False
+
+
+class RebuildIncompleteError(RuntimeError):
+    """Raised when a full rebuild cannot evaluate every selected candidate."""
 
 
 REFUSAL_MARKERS = (
@@ -79,10 +84,10 @@ class CurateService:
         self._cycle_limit = cycle_limit
         self._daily_cap = daily_cap
 
-    async def run(self, now: datetime) -> CurateReport:
+    async def run(self, now: datetime, *, rebuild: bool = False) -> CurateReport:
         """Select new candidates and write only transformed Korean output."""
 
-        terminal_ids = self._state.stage2_terminal_ids()
+        terminal_ids = set() if rebuild else self._state.stage2_terminal_ids()
         raw_items = [item for item in self._storage.read_items() if item.item_id not in terminal_ids]
         source_ids = {item.source_id for item in raw_items}
         geeknews_only = source_ids == {"geeknews"}
@@ -95,6 +100,7 @@ class CurateService:
         assessed: list[tuple[ScoredRawItem, LlmAssessment, float]] = []
         failed_item_ids: list[str] = []
         safety_rejected = 0
+        safety_rejections: dict[str, str] = {}
         for candidate in candidates:
             try:
                 assessment = await self._llm.assess(candidate)
@@ -102,11 +108,15 @@ class CurateService:
                 if not assessment.safety_ok or refusal_detected:
                     categories = ",".join(assessment.safety_categories)
                     prefix = categories or "refusal_language"
-                    self._state.mark_safety_rejected(
-                        candidate.raw.item_id,
-                        at=now,
-                        reason=f"{prefix}: {assessment.safety_reason}",
-                    )
+                    rejection_reason = f"{prefix}: {assessment.safety_reason}"
+                    if rebuild:
+                        safety_rejections[candidate.raw.item_id] = rejection_reason
+                    else:
+                        self._state.mark_safety_rejected(
+                            candidate.raw.item_id,
+                            at=now,
+                            reason=rejection_reason,
+                        )
                     safety_rejected += 1
                     continue
                 score = curation_score(
@@ -126,16 +136,31 @@ class CurateService:
                 failed_item_ids.append(candidate.raw.item_id)
                 LOGGER.exception("LLM assessment failed", extra={"item_id": candidate.raw.item_id})
 
+        if rebuild and failed_item_ids:
+            raise RebuildIncompleteError(
+                f"Stage 2 rebuild failed for {len(failed_item_ids)} candidate(s)"
+            )
         if candidates and len(failed_item_ids) == len(candidates):
             raise RuntimeError("All LLM assessments failed")
 
         assessed.sort(
             key=lambda entry: (-entry[2], -entry[0].reaction_score, entry[0].raw.item_id)
         )
-        remaining_today = max(self._daily_cap - self._state.count_curated_on(now.date()), 0)
+        remaining_today = (
+            self._cycle_limit
+            if rebuild
+            else max(self._daily_cap - self._state.count_curated_on(now.date()), 0)
+        )
         selected = assessed[: min(self._cycle_limit, remaining_today)]
         curated = [self._to_curated(*entry) for entry in selected]
-        if curated:
+        if rebuild:
+            self._storage.replace_curated(curated)
+            self._state.replace_stage2_results(
+                curated_ids=[item.item_id for item in curated],
+                safety_rejections=safety_rejections,
+                at=now,
+            )
+        elif curated:
             self._storage.write_curated(curated)
             self._state.mark_curated([item.item_id for item in curated], at=now)
         return CurateReport(
@@ -143,6 +168,7 @@ class CurateService:
             passed=len(curated),
             safety_rejected=safety_rejected,
             failed_item_ids=failed_item_ids,
+            rebuilt=rebuild,
         )
 
     def _to_curated(
