@@ -151,8 +151,31 @@ async def test_title_payload_contains_final_script_and_not_original_summary() ->
     payload = json.dumps(transport.calls[0].input, ensure_ascii=False)
     assert script in payload
     assert curated_item().summary not in payload
+    assert "18~34자" in payload
     assert transport.calls[0].output_type is TitlePackage
     assert transport.calls[0].max_output_tokens == 600
+
+
+@pytest.mark.asyncio
+async def test_revision_payload_includes_proportional_character_target() -> None:
+    """Catch vague shortening instructions that fail to converge within two calls."""
+
+    current_script = "업무 변화에 관한 긴 설명입니다. " * 20
+    transport = CapturingResponsesTransport(ScriptDraft(script="줄인 한국어 대본입니다."))
+    client = OpenAiGenerationLlmClient(transport=transport, model="gpt-5.4-mini")
+
+    await client.revise(
+        curated_item(),
+        valid_analysis(),
+        current_script,
+        direction="shorten",
+        current_duration_seconds=90,
+        target_duration_seconds=45,
+    )
+
+    payload = transport.calls[0].input[-1]["content"]
+    assert f'"target_character_count": {round(len(current_script) * 0.5)}' in payload
+    assert "±10%" in payload
 
 
 @pytest.mark.asyncio

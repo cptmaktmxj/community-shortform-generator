@@ -236,6 +236,13 @@ class GenerateService:
 
         assert estimate is not None
         if estimate.classification not in {"ideal", "acceptable"}:
+            self.state.save_generation_script(
+                item.item_id,
+                script=script,
+                estimated_duration=estimate.seconds,
+                revision_count=revision_count,
+                at=now,
+            )
             self.state.save_generation_failure(
                 item.item_id,
                 status="duration_failed",

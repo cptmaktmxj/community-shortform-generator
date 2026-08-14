@@ -61,6 +61,7 @@ def build_draft_input(
             "role": "user",
             "content": (
                 "검증된 분석만 사용해 1.2배속 기준 약 45초 한국어 낭독 대본을 작성하세요. "
+                "공백 포함 260~320자를 목표로 하세요. "
                 "구조는 강한 훅, 무슨 일이 생겼는지, 대중에게 왜 중요한지, "
                 "현실적인 영향, 짧은 마무리의 다섯 부분으로 자연스럽게 이어가세요. "
                 "제목, URL, 제작 지시문은 넣지 마세요.\n"
@@ -82,10 +83,13 @@ def build_revision_input(
     """Build a bounded length revision request without changing factual claims."""
 
     del item
+    duration_ratio = target_duration_seconds / max(current_duration_seconds, 0.001)
+    target_character_count = max(1, round(len(script) * duration_ratio))
     revision = {
         "direction": direction,
         "current_duration_seconds": current_duration_seconds,
         "target_duration_seconds": target_duration_seconds,
+        "target_character_count": target_character_count,
         "analysis": analysis.model_dump(mode="json"),
         "current_script": script,
     }
@@ -96,6 +100,7 @@ def build_revision_input(
             "content": (
                 "핵심 사실과 다섯 부분 흐름을 유지하면서 대본 길이만 조정하세요. "
                 "expand면 설명을 보강하고 shorten이면 중복·수식을 줄이세요. "
+                "공백 포함 목표 글자 수의 ±10% 범위에 반드시 맞추세요. "
                 "제목이나 URL을 추가하지 마세요.\n"
                 + json.dumps(revision, ensure_ascii=False)
             ),
@@ -119,6 +124,7 @@ def build_title_input(
             "role": "user",
             "content": (
                 "최종 대본에 실제로 들어 있는 주장만 사용해 제목 세 개를 만드세요. "
+                "각 제목은 공백 포함 18~34자로 작성하세요. "
                 "스타일은 direct_impact, question, conventional_wisdom_reversal을 "
                 "각각 한 번 사용하고, 근거가 되는 대본의 정확한 부분 문자열을 제시하세요.\n"
                 + json.dumps(title_context, ensure_ascii=False)

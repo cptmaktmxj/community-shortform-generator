@@ -226,6 +226,9 @@ async def test_duration_failure_never_calls_title(tmp_path: Path) -> None:
     assert report.duration_failed == 1
     job = service.state.load_generation_job("geeknews:1")
     assert job is not None and job.status == "duration_failed"
+    assert job.script == "짧음."
+    assert job.revision_count == 2
+    assert job.estimated_duration_seconds is not None
 
 
 @pytest.mark.asyncio
