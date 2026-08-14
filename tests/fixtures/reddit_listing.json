@@ -1,0 +1,8 @@
+{
+  "data": {
+    "children": [
+      {"data": {"id": "abc", "title": "Agent reliability discussion", "selftext": "Why agents fail at the last step", "permalink": "/r/AI_Agents/comments/abc/topic/", "ups": 21, "num_comments": 8, "created_utc": 1786680000, "stickied": false}},
+      {"data": {"id": "stickied", "title": "Community rules", "selftext": "Read first", "permalink": "/r/AI_Agents/comments/stickied/rules/", "ups": 500, "num_comments": 50, "created_utc": 1786680000, "stickied": true}}
+    ]
+  }
+}

@@ -1,0 +1,5 @@
+[
+  {"id": 100, "type": "story", "time": 1786680000, "title": "A useful AI release", "url": "https://example.com/ai", "score": 12, "descendants": 4, "text": "Release details"},
+  {"id": 101, "type": "job", "time": 1786680000, "title": "Job listing", "url": "https://example.com/job", "score": 1, "descendants": 0},
+  {"id": 102, "type": "story", "time": 1700000000, "title": "Old story", "url": "https://example.com/old", "score": 100, "descendants": 20}
+]
