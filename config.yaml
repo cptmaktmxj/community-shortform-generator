@@ -10,5 +10,20 @@ llm:
   api_key_default: ollama
   timeout_seconds: 120
 
+generation_llm:
+  mode: openai
+  base_url: https://api.openai.com/v1
+  model: gpt-5.4-mini
+  api_key_env: OPENAI_API_KEY
+  timeout_seconds: 120
+
+script:
+  target_seconds: 45
+  min_seconds: 30
+  max_seconds: 60
+  playback_speed: 1.2
+  base_spoken_units_per_second: 4.3
+  max_revisions: 2
+
 reddit:
   access_token_env: REDDIT_ACCESS_TOKEN

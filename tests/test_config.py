@@ -60,6 +60,19 @@ llm:
   api_key_env: TEST_LLM_API_KEY
   api_key_default: local-development
   timeout_seconds: 45
+generation_llm:
+  mode: openai
+  base_url: https://api.openai.com/v1
+  model: gpt-5.4-mini
+  api_key_env: TEST_GENERATION_KEY
+  timeout_seconds: 120
+script:
+  target_seconds: 45
+  min_seconds: 30
+  max_seconds: 60
+  playback_speed: 1.2
+  base_spoken_units_per_second: 4.3
+  max_revisions: 2
 reddit:
   access_token_env: TEST_REDDIT_TOKEN
 """
@@ -135,3 +148,34 @@ def test_load_app_config_uses_non_secret_fallbacks_when_environment_is_empty(
     assert resolved.user_agent == "config-user-agent"
     assert resolved.llm_api_key == "local-development"
     assert resolved.reddit_access_token is None
+
+
+def test_generation_config_resolves_key_without_hardcoding(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Catch the OpenAI secret being placed in committed YAML."""
+
+    path = tmp_path / "config.yaml"
+    path.write_text(APP_CONFIG_YAML, encoding="utf-8")
+    monkeypatch.setenv("TEST_GENERATION_KEY", "test-secret")
+
+    config = load_app_config(path)
+    resolved = config.resolve()
+
+    assert resolved.generation_llm_model == "gpt-5.4-mini"
+    assert resolved.generation_llm_api_key == "test-secret"
+    assert resolved.script_timing.playback_speed == 1.2
+    assert "test-secret" not in config.model_dump_json()
+
+
+def test_generation_config_rejects_invalid_duration_bounds(tmp_path: Path) -> None:
+    """Catch a target interval that can never classify a valid script."""
+
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        APP_CONFIG_YAML.replace("min_seconds: 30", "min_seconds: 61"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="duration bounds"):
+        load_app_config(path)

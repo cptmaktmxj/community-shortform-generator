@@ -5,7 +5,14 @@ from pathlib import Path
 from typing import Literal, Mapping
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    HttpUrl,
+    ValidationError,
+    model_validator,
+)
 
 
 class ConfigError(ValueError):
@@ -50,6 +57,39 @@ class LlmConfig(BaseModel):
     timeout_seconds: float = Field(gt=0)
 
 
+class GenerationLlmConfig(BaseModel):
+    """OpenAI generation settings without embedding the API credential."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["openai", "fixture"]
+    base_url: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    api_key_env: str = Field(pattern=r"^[A-Z][A-Z0-9_]*$")
+    timeout_seconds: float = Field(gt=0)
+
+
+class ScriptTimingConfig(BaseModel):
+    """Local narration-duration targets and bounded revision settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    target_seconds: float = Field(gt=0)
+    min_seconds: float = Field(gt=0)
+    max_seconds: float = Field(gt=0)
+    playback_speed: float = Field(gt=0)
+    base_spoken_units_per_second: float = Field(gt=0)
+    max_revisions: int = Field(ge=0, le=10)
+
+    @model_validator(mode="after")
+    def validate_duration_bounds(self) -> "ScriptTimingConfig":
+        """Require the target to sit strictly inside the accepted duration range."""
+
+        if not self.min_seconds < self.target_seconds < self.max_seconds:
+            raise ValueError("duration bounds must satisfy min < target < max")
+        return self
+
+
 class RedditConfig(BaseModel):
     """Environment lookup configuration for Reddit OAuth credentials."""
 
@@ -69,6 +109,12 @@ class ResolvedAppConfig(BaseModel):
     llm_model: str
     llm_api_key: str
     llm_timeout_seconds: float
+    generation_llm_mode: Literal["openai", "fixture"]
+    generation_llm_base_url: str
+    generation_llm_model: str
+    generation_llm_api_key: str | None
+    generation_llm_timeout_seconds: float
+    script_timing: ScriptTimingConfig
     reddit_access_token: str | None
 
 
@@ -79,6 +125,8 @@ class AppConfig(BaseModel):
 
     http: HttpConfig
     llm: LlmConfig
+    generation_llm: GenerationLlmConfig
+    script: ScriptTimingConfig
     reddit: RedditConfig
 
     def resolve(self, environ: Mapping[str, str] | None = None) -> ResolvedAppConfig:
@@ -92,6 +140,12 @@ class AppConfig(BaseModel):
             llm_model=self.llm.model,
             llm_api_key=values.get(self.llm.api_key_env, self.llm.api_key_default),
             llm_timeout_seconds=self.llm.timeout_seconds,
+            generation_llm_mode=self.generation_llm.mode,
+            generation_llm_base_url=self.generation_llm.base_url,
+            generation_llm_model=self.generation_llm.model,
+            generation_llm_api_key=values.get(self.generation_llm.api_key_env),
+            generation_llm_timeout_seconds=self.generation_llm.timeout_seconds,
+            script_timing=self.script,
             reddit_access_token=values.get(self.reddit.access_token_env),
         )
 
