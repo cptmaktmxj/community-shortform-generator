@@ -16,6 +16,35 @@ SafetyCategory = Literal[
     "privacy_or_doxxing",
     "fraud_or_evasion",
 ]
+MassAppealBand = Literal[
+    "specialist_only",
+    "tech_enthusiast",
+    "general_interest",
+    "direct_impact",
+    "broad_impact",
+]
+ProvocationBand = Literal[
+    "routine",
+    "specialist_novelty",
+    "challenges_expectation",
+    "clear_disruption",
+    "broad_shock",
+]
+
+MASS_APPEAL_SCORES: dict[str, float] = {
+    "specialist_only": 0.1,
+    "tech_enthusiast": 0.3,
+    "general_interest": 0.5,
+    "direct_impact": 0.7,
+    "broad_impact": 0.9,
+}
+PROVOCATION_SCORES: dict[str, float] = {
+    "routine": 0.1,
+    "specialist_novelty": 0.3,
+    "challenges_expectation": 0.5,
+    "clear_disruption": 0.7,
+    "broad_shock": 0.9,
+}
 
 
 class StrictModel(BaseModel):
@@ -65,7 +94,11 @@ class LlmAssessment(StrictModel):
     """Schema-constrained response produced by the Stage 2 model."""
 
     provocation_score: float = Field(ge=0.0, le=1.0)
+    provocation_band: ProvocationBand
+    provocation_reason: str = Field(min_length=1)
     mass_appeal_score: float = Field(ge=0.0, le=1.0)
+    mass_appeal_band: MassAppealBand
+    mass_appeal_reason: str = Field(min_length=1)
     fidelity_score: float = Field(ge=0.0, le=1.0)
     safety_ok: bool
     safety_reason: str = Field(min_length=1)
@@ -81,12 +114,21 @@ class LlmAssessment(StrictModel):
     def safety_fields_must_match_decision(self) -> "LlmAssessment":
         """Keep rejected assessments from carrying generated content downstream."""
 
-        explanations = (self.safety_reason, self.reason)
+        explanations = (
+            self.safety_reason,
+            self.reason,
+            self.provocation_reason,
+            self.mass_appeal_reason,
+        )
         if any(
             not any("가" <= character <= "힣" for character in text)
             for text in explanations
         ):
             raise ValueError("assessment explanations must contain Korean text")
+        if self.provocation_score != PROVOCATION_SCORES[self.provocation_band]:
+            raise ValueError("provocation_score must match its anchor score")
+        if self.mass_appeal_score != MASS_APPEAL_SCORES[self.mass_appeal_band]:
+            raise ValueError("mass_appeal_score must match its anchor score")
         if self.safety_ok:
             if self.safety_categories:
                 raise ValueError("safety_categories must be empty when safety_ok is true")
@@ -118,7 +160,11 @@ class CuratedItem(StrictModel):
     pass_: bool = Field(alias="pass", serialization_alias="pass")
     reaction_score: float = Field(ge=0.0, le=1.0)
     provocation_score: float = Field(ge=0.0, le=1.0)
+    provocation_band: ProvocationBand
+    provocation_reason: str
     mass_appeal_score: float = Field(ge=0.0, le=1.0)
+    mass_appeal_band: MassAppealBand
+    mass_appeal_reason: str
     curation_score: float = Field(ge=0.0, le=1.0)
     fidelity_score: float = Field(ge=0.0, le=1.0)
     safety_ok: Literal[True]

@@ -19,15 +19,48 @@ def item(item_id: str, source: str, likes: int, comments: int) -> RawItem:
     )
 
 
-def test_curation_score_uses_40_25_35_weights() -> None:
-    assert curation_score(1.0, 0.4, 0.2) == pytest.approx(0.57)
+def test_curation_score_uses_20_40_40_weights() -> None:
+    """Catch source reaction dominating audience-fit content signals."""
+
+    assert curation_score(1.0, 0.5, 0.7) == pytest.approx(0.68)
 
 
-def test_fidelity_below_point_75_fails_even_with_high_scores() -> None:
-    assert passes_gates(score=0.99, fidelity=0.74, safety_ok=True) is False
-    assert passes_gates(score=0.61, fidelity=1.0, safety_ok=True) is False
-    assert passes_gates(score=0.99, fidelity=1.0, safety_ok=False) is False
-    assert passes_gates(score=0.62, fidelity=0.75, safety_ok=True) is True
+@pytest.mark.parametrize(
+    ("score", "provocation", "mass_appeal", "fidelity", "safety_ok"),
+    [
+        (0.619, 0.5, 0.5, 0.9, True),
+        (0.9, 0.34, 0.7, 0.9, True),
+        (0.9, 0.7, 0.44, 0.9, True),
+        (0.9, 0.7, 0.7, 0.74, True),
+        (0.9, 0.7, 0.7, 0.9, False),
+    ],
+)
+def test_each_independent_gate_can_reject(
+    score: float,
+    provocation: float,
+    mass_appeal: float,
+    fidelity: float,
+    safety_ok: bool,
+) -> None:
+    """Catch a strong combined score bypassing one mandatory quality gate."""
+
+    assert passes_gates(
+        score=score,
+        provocation=provocation,
+        mass_appeal=mass_appeal,
+        fidelity=fidelity,
+        safety_ok=safety_ok,
+    ) is False
+
+
+def test_all_independent_gates_accept_the_boundary() -> None:
+    assert passes_gates(
+        score=0.62,
+        provocation=0.35,
+        mass_appeal=0.45,
+        fidelity=0.75,
+        safety_ok=True,
+    ) is True
 
 
 def test_reaction_scores_use_source_local_percentiles() -> None:

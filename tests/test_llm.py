@@ -11,8 +11,12 @@ from community_shorts.prefilter import ScoredRawItem
 
 
 VALID_ASSESSMENT = {
-    "provocation_score": 0.8,
+    "provocation_score": 0.7,
+    "provocation_band": "clear_disruption",
+    "provocation_reason": "업무 방식에 뚜렷한 변화를 만드는 소재입니다.",
     "mass_appeal_score": 0.9,
+    "mass_appeal_band": "broad_impact",
+    "mass_appeal_reason": "많은 사람의 일상과 업무에 직접 영향을 줍니다.",
     "fidelity_score": 0.95,
     "safety_ok": True,
     "safety_reason": "일반적인 기술 뉴스 요약으로 생성할 수 있습니다.",
@@ -143,6 +147,8 @@ async def test_english_item_prompt_requires_korean_output() -> None:
     assert "한국어" in transport.messages[0][0]["content"]
     assert "safety_ok" in transport.messages[0][0]["content"]
     assert "도와드릴 수 없습니다" in transport.messages[0][0]["content"]
+    assert "기술 종사자가 아니지만" in transport.messages[0][0]["content"]
+    assert "specialist_only" in transport.messages[0][0]["content"]
 
 
 @pytest.mark.asyncio

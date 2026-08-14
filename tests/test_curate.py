@@ -112,7 +112,11 @@ class UnsafeLlm(FixtureLlmClient):
     async def assess(self, item):
         return LlmAssessment(
             provocation_score=0.9,
-            mass_appeal_score=0.8,
+            provocation_band="broad_shock",
+            provocation_reason="광범위하게 악용될 수 있는 위험한 요청입니다.",
+            mass_appeal_score=0.7,
+            mass_appeal_band="direct_impact",
+            mass_appeal_reason="다수의 계정과 개인정보에 직접 피해를 줄 수 있습니다.",
             fidelity_score=0.95,
             safety_ok=False,
             safety_reason="실행 가능한 공격 절차를 제공하도록 유도합니다.",

@@ -116,6 +116,8 @@ class CurateService:
                 )
                 if passes_gates(
                     score=score,
+                    provocation=assessment.provocation_score,
+                    mass_appeal=assessment.mass_appeal_score,
                     fidelity=assessment.fidelity_score,
                     safety_ok=assessment.safety_ok,
                 ):
@@ -165,7 +167,11 @@ class CurateService:
             pass_=True,
             reaction_score=candidate.reaction_score,
             provocation_score=assessment.provocation_score,
+            provocation_band=assessment.provocation_band,
+            provocation_reason=assessment.provocation_reason,
             mass_appeal_score=assessment.mass_appeal_score,
+            mass_appeal_band=assessment.mass_appeal_band,
+            mass_appeal_reason=assessment.mass_appeal_reason,
             curation_score=round(score, 6),
             fidelity_score=assessment.fidelity_score,
             safety_ok=True,

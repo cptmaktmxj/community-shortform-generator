@@ -18,6 +18,50 @@ def raw_item_data() -> dict[str, object]:
     }
 
 
+def anchored_assessment_data() -> dict[str, object]:
+    """Return one complete anchored assessment independent of model internals."""
+
+    return {
+        "provocation_band": "challenges_expectation",
+        "provocation_score": 0.5,
+        "provocation_reason": "대중이 가진 일반적인 예상을 뒤집습니다.",
+        "mass_appeal_band": "general_interest",
+        "mass_appeal_score": 0.5,
+        "mass_appeal_reason": "프로그램과 AI 관심층이 이해할 수 있습니다.",
+        "fidelity_score": 0.9,
+        "safety_ok": True,
+        "safety_reason": "일반적인 기술 뉴스로 안전하게 생성할 수 있습니다.",
+        "safety_categories": [],
+        "reason": "타깃 대중에게 설명할 수 있는 변화입니다.",
+        "summary": "핵심 내용을 한국어로 요약했습니다.",
+        "key_claim": "중요한 변화가 발생했습니다.",
+        "hook_points": ["예상 밖의 결과"],
+        "tone": "정보형",
+        "output_language": "ko",
+    }
+
+
+def test_assessment_accepts_exact_anchor_scores() -> None:
+    """Catch Stage 2 dropping the auditable audience and provocation anchors."""
+
+    assessment = LlmAssessment.model_validate(anchored_assessment_data())
+
+    assert assessment.mass_appeal_band == "general_interest"
+    assert assessment.provocation_band == "challenges_expectation"
+
+
+def test_assessment_rejects_scores_that_do_not_match_anchor_bands() -> None:
+    """Catch a model inflating a niche band with a broad-impact score."""
+
+    payload = anchored_assessment_data() | {
+        "mass_appeal_band": "specialist_only",
+        "mass_appeal_score": 0.9,
+    }
+
+    with pytest.raises(ValidationError, match="anchor score"):
+        LlmAssessment.model_validate(payload)
+
+
 def test_raw_item_rejects_naive_fetched_at() -> None:
     data = raw_item_data()
     data["fetched_at"] = datetime(2026, 8, 14)
@@ -38,7 +82,11 @@ def test_llm_assessment_rejects_out_of_range_score() -> None:
     with pytest.raises(ValidationError):
         LlmAssessment(
             provocation_score=1.1,
+            provocation_band="broad_shock",
+            provocation_reason="광범위한 영향을 주장하는 소재입니다.",
             mass_appeal_score=0.5,
+            mass_appeal_band="general_interest",
+            mass_appeal_reason="일반적인 프로그램 관심층이 이해할 수 있습니다.",
             fidelity_score=0.9,
             safety_ok=True,
             safety_reason="일반적인 요약이 가능한 소재입니다.",
@@ -57,7 +105,11 @@ def test_unsafe_assessment_requires_categories_and_empty_output() -> None:
 
     assessment = LlmAssessment(
         provocation_score=0.9,
-        mass_appeal_score=0.8,
+        provocation_band="broad_shock",
+        provocation_reason="광범위하게 악용될 수 있는 위험한 요청입니다.",
+        mass_appeal_score=0.7,
+        mass_appeal_band="direct_impact",
+        mass_appeal_reason="다수의 계정과 개인정보에 직접 피해를 줄 수 있습니다.",
         fidelity_score=0.9,
         safety_ok=False,
         safety_reason="실행 가능한 공격 절차를 포함합니다.",
@@ -89,7 +141,11 @@ def test_assessment_defaults_to_korean_but_rejects_non_korean_safe_output() -> N
 
     payload = {
         "provocation_score": 0.7,
-        "mass_appeal_score": 0.8,
+        "provocation_band": "clear_disruption",
+        "provocation_reason": "업무 방식에 뚜렷한 변화를 만드는 소재입니다.",
+        "mass_appeal_score": 0.7,
+        "mass_appeal_band": "direct_impact",
+        "mass_appeal_reason": "직장인의 시간과 업무에 직접 영향을 줍니다.",
         "fidelity_score": 0.9,
         "safety_ok": True,
         "safety_reason": "일반적인 기술 뉴스로 생성할 수 있습니다.",
@@ -124,7 +180,11 @@ def test_assessment_requires_korean_explanations() -> None:
 
     payload = {
         "provocation_score": 0.7,
-        "mass_appeal_score": 0.8,
+        "provocation_band": "clear_disruption",
+        "provocation_reason": "업무 방식에 뚜렷한 변화를 만드는 소재입니다.",
+        "mass_appeal_score": 0.7,
+        "mass_appeal_band": "direct_impact",
+        "mass_appeal_reason": "직장인의 시간과 업무에 직접 영향을 줍니다.",
         "fidelity_score": 0.9,
         "safety_ok": True,
         "safety_reason": "Safe technical news.",
@@ -155,9 +215,16 @@ def test_curated_item_does_not_accept_original_body() -> None:
         "pass": True,
         "reaction_score": 0.8,
         "provocation_score": 0.7,
+        "provocation_band": "clear_disruption",
+        "provocation_reason": "업무 방식에 뚜렷한 변화를 만드는 소재입니다.",
         "mass_appeal_score": 0.9,
+        "mass_appeal_band": "broad_impact",
+        "mass_appeal_reason": "많은 사람의 일상과 업무에 직접 영향을 줍니다.",
         "curation_score": 0.81,
         "fidelity_score": 0.9,
+        "safety_ok": True,
+        "safety_reason": "안전한 기술 뉴스입니다.",
+        "safety_categories": [],
         "curation_reason": "반응과 대중성이 높음",
         "model": "fixture",
         "body": "원문 전문",

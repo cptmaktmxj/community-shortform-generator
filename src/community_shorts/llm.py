@@ -148,8 +148,12 @@ class FixtureLlmClient:
         """Create stable Korean output without contacting a model endpoint."""
 
         return LlmAssessment(
-            provocation_score=0.95,
-            mass_appeal_score=0.95,
+            provocation_score=0.9,
+            provocation_band="broad_shock",
+            provocation_reason="대중의 일반적인 예상을 크게 뒤집는 시험 소재입니다.",
+            mass_appeal_score=0.9,
+            mass_appeal_band="broad_impact",
+            mass_appeal_reason="다수의 일상과 업무에 직접 연결되는 시험 소재입니다.",
             fidelity_score=0.95,
             safety_ok=True,
             safety_reason="일반적인 기술 뉴스 요약으로 안전하게 생성할 수 있습니다.",

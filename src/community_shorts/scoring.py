@@ -52,12 +52,25 @@ def reaction_scores(items: Sequence[RawItem]) -> dict[str, float]:
 
 
 def curation_score(reaction: float, provocation: float, mass_appeal: float) -> float:
-    """Combine independently calculated reaction and LLM content signals."""
+    """Weight audience-fit content signals above source-local reactions."""
 
-    return reaction * 0.40 + provocation * 0.25 + mass_appeal * 0.35
+    return reaction * 0.20 + provocation * 0.40 + mass_appeal * 0.40
 
 
-def passes_gates(*, score: float, fidelity: float, safety_ok: bool) -> bool:
-    """Apply the fixed quality, fidelity, and safety thresholds."""
+def passes_gates(
+    *,
+    score: float,
+    provocation: float,
+    mass_appeal: float,
+    fidelity: float,
+    safety_ok: bool,
+) -> bool:
+    """Require combined quality and every independent Stage 2 threshold."""
 
-    return safety_ok and score >= 0.62 and fidelity >= 0.75
+    return (
+        safety_ok
+        and score >= 0.62
+        and provocation >= 0.35
+        and mass_appeal >= 0.45
+        and fidelity >= 0.75
+    )
