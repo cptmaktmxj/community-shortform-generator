@@ -90,6 +90,19 @@ class StateStore:
                 [(at.isoformat(), item_id) for item_id in item_ids],
             )
 
+    def mark_safety_rejected(self, item_id: str, *, at: datetime, reason: str) -> None:
+        """Persist a terminal Stage 2 safety decision without counting it as curated."""
+
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE items
+                SET curated_at = NULL, status = 'safety_rejected', error = ?
+                WHERE item_id = ?
+                """,
+                (reason, item_id),
+            )
+
     def count_curated_on(self, day: date) -> int:
         """Count selected records whose UTC timestamp falls on a date."""
 
@@ -106,6 +119,18 @@ class StateStore:
         with self._connect() as connection:
             rows = connection.execute(
                 "SELECT item_id FROM items WHERE curated_at IS NOT NULL"
+            ).fetchall()
+        return {str(row["item_id"]) for row in rows}
+
+    def stage2_terminal_ids(self) -> set[str]:
+        """Return IDs already curated or permanently rejected by the safety gate."""
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT item_id FROM items
+                WHERE curated_at IS NOT NULL OR status = 'safety_rejected'
+                """
             ).fetchall()
         return {str(row["item_id"]) for row in rows}
 

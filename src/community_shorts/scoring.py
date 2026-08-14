@@ -57,7 +57,7 @@ def curation_score(reaction: float, provocation: float, mass_appeal: float) -> f
     return reaction * 0.40 + provocation * 0.25 + mass_appeal * 0.35
 
 
-def passes_gates(*, score: float, fidelity: float, safe: bool) -> bool:
+def passes_gates(*, score: float, fidelity: float, safety_ok: bool) -> bool:
     """Apply the fixed quality, fidelity, and safety thresholds."""
 
-    return safe and score >= 0.62 and fidelity >= 0.75
+    return safety_ok and score >= 0.62 and fidelity >= 0.75

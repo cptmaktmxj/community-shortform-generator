@@ -1,5 +1,6 @@
 import json
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 
@@ -13,7 +14,9 @@ VALID_ASSESSMENT = {
     "provocation_score": 0.8,
     "mass_appeal_score": 0.9,
     "fidelity_score": 0.95,
-    "safe": True,
+    "safety_ok": True,
+    "safety_reason": "일반적인 기술 뉴스 요약으로 생성할 수 있습니다.",
+    "safety_categories": [],
     "reason": "대중적 관심과 실제 반응이 충분합니다.",
     "summary": "핵심 내용을 한국어로 요약했습니다.",
     "key_claim": "검증 가능한 핵심 주장입니다.",
@@ -69,6 +72,40 @@ def test_openai_transport_disables_sdk_retries_and_bounds_connect_timeout(monkey
 
 
 @pytest.mark.asyncio
+async def test_openai_transport_caps_completion_tokens(monkeypatch) -> None:
+    """Catch local models generating indefinitely when no output limit is sent."""
+
+    captured = {}
+
+    class FakeCompletions:
+        async def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content='{"ok": true}'))]
+            )
+
+    class FakeAsyncOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(llm_module, "AsyncOpenAI", FakeAsyncOpenAI)
+    transport = llm_module.OpenAiChatTransport(
+        base_url="http://127.0.0.1:8000/v1",
+        api_key="EMPTY",
+        timeout_seconds=120,
+    )
+
+    await transport.complete(
+        messages=[{"role": "user", "content": "test"}],
+        model="test-model",
+        response_schema={"type": "object"},
+    )
+
+    assert captured["max_completion_tokens"] == 1024
+    assert captured["temperature"] == 0
+
+
+@pytest.mark.asyncio
 async def test_client_retries_invalid_json_once() -> None:
     transport = SequencedChat(["not-json", json.dumps(VALID_ASSESSMENT, ensure_ascii=False)])
     result = await OpenAiLlmClient(transport=transport, model="test").assess(english_item())
@@ -76,6 +113,23 @@ async def test_client_retries_invalid_json_once() -> None:
     assert result.output_language == "ko"
     assert transport.calls == 2
     assert "JSON" in transport.messages[1][-1]["content"]
+    assert "safety_reason" in transport.messages[1][-1]["content"]
+    assert "한국어" in transport.messages[1][-1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_client_repairs_only_a_single_missing_object_closer() -> None:
+    """Catch constrained decoding that stalls on whitespace before the final brace."""
+
+    valid_json = json.dumps(VALID_ASSESSMENT, ensure_ascii=False)
+    truncated_with_whitespace = valid_json[:-1] + ("\n " * 200)
+    transport = SequencedChat([truncated_with_whitespace])
+
+    result = await OpenAiLlmClient(transport=transport, model="test").assess(english_item())
+
+    assert result.safety_ok is True
+    assert result.summary == "핵심 내용을 한국어로 요약했습니다."
+    assert transport.calls == 1
 
 
 @pytest.mark.asyncio
@@ -87,6 +141,8 @@ async def test_english_item_prompt_requires_korean_output() -> None:
     assert '"source_language": "en"' in payload
     assert '"output_language": "ko"' in payload
     assert "한국어" in transport.messages[0][0]["content"]
+    assert "safety_ok" in transport.messages[0][0]["content"]
+    assert "도와드릴 수 없습니다" in transport.messages[0][0]["content"]
 
 
 @pytest.mark.asyncio
@@ -94,4 +150,5 @@ async def test_fixture_client_returns_korean_fields_for_english_input() -> None:
     result = await FixtureLlmClient().assess(english_item())
 
     assert result.output_language == "ko"
+    assert result.safety_ok is True
     assert any("가" <= character <= "힣" for character in result.summary)

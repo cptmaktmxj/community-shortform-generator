@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from community_shorts.config import ConfigError, load_sources
+from community_shorts.config import ConfigError, load_app_config, load_sources
 
 
 SOURCES_YAML = """
@@ -49,6 +49,21 @@ sources:
     enabled: false
 """
 
+APP_CONFIG_YAML = """
+http:
+  user_agent: config-user-agent
+  user_agent_env: TEST_USER_AGENT
+llm:
+  mode: fixture
+  base_url: http://127.0.0.1:11434/v1
+  model: qwen3:8b
+  api_key_env: TEST_LLM_API_KEY
+  api_key_default: local-development
+  timeout_seconds: 45
+reddit:
+  access_token_env: TEST_REDDIT_TOKEN
+"""
+
 
 def test_load_sources_registers_eight_sources_and_only_geeknews_is_enabled(
     tmp_path: Path,
@@ -81,3 +96,42 @@ def test_load_sources_rejects_unknown_adapter(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigError, match="Unsupported adapter: unknown"):
         load_sources(path)
+
+
+def test_load_app_config_resolves_secrets_from_declared_environment_names(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Catch runtime code that hardcodes credential environment variable names."""
+
+    path = tmp_path / "config.yaml"
+    path.write_text(APP_CONFIG_YAML, encoding="utf-8")
+    monkeypatch.setenv("TEST_USER_AGENT", "environment-user-agent")
+    monkeypatch.setenv("TEST_LLM_API_KEY", "test-llm-key")
+    monkeypatch.setenv("TEST_REDDIT_TOKEN", "test-reddit-token")
+
+    resolved = load_app_config(path).resolve()
+
+    assert resolved.user_agent == "environment-user-agent"
+    assert resolved.llm_mode == "fixture"
+    assert resolved.llm_base_url == "http://127.0.0.1:11434/v1"
+    assert resolved.llm_model == "qwen3:8b"
+    assert resolved.llm_api_key == "test-llm-key"
+    assert resolved.llm_timeout_seconds == 45
+    assert resolved.reddit_access_token == "test-reddit-token"
+
+
+def test_load_app_config_uses_non_secret_fallbacks_when_environment_is_empty(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Catch optional local development credentials becoming mandatory."""
+
+    path = tmp_path / "config.yaml"
+    path.write_text(APP_CONFIG_YAML, encoding="utf-8")
+    for name in ("TEST_USER_AGENT", "TEST_LLM_API_KEY", "TEST_REDDIT_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+
+    resolved = load_app_config(path).resolve()
+
+    assert resolved.user_agent == "config-user-agent"
+    assert resolved.llm_api_key == "local-development"
+    assert resolved.reddit_access_token is None

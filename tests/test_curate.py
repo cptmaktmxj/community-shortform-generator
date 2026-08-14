@@ -5,7 +5,7 @@ import pytest
 
 from community_shorts.curate import CurateService
 from community_shorts.llm import FixtureLlmClient
-from community_shorts.models import Metrics, RawItem
+from community_shorts.models import LlmAssessment, Metrics, RawItem
 from community_shorts.state import StateStore
 from community_shorts.storage import ArtifactStore
 
@@ -98,3 +98,73 @@ async def test_curate_fails_stage_when_every_llm_call_fails(tmp_path: Path) -> N
         await service.run(NOW)
 
     assert store.read_curated() == []
+
+
+class RefusalLanguageLlm(FixtureLlmClient):
+    async def assess(self, item):
+        assessment = await super().assess(item)
+        return assessment.model_copy(
+            update={"summary": "죄송하지만 이 요청은 도와드릴 수 없습니다."}
+        )
+
+
+class UnsafeLlm(FixtureLlmClient):
+    async def assess(self, item):
+        return LlmAssessment(
+            provocation_score=0.9,
+            mass_appeal_score=0.8,
+            fidelity_score=0.95,
+            safety_ok=False,
+            safety_reason="실행 가능한 공격 절차를 제공하도록 유도합니다.",
+            safety_categories=["actionable_cyber_abuse"],
+            reason="안전 기준을 통과하지 못했습니다.",
+            summary="",
+            key_claim="",
+            hook_points=[],
+            tone="",
+            output_language="ko",
+        )
+
+
+class PositivePolicyLanguageLlm(FixtureLlmClient):
+    async def assess(self, item):
+        assessment = await super().assess(item)
+        return assessment.model_copy(
+            update={"safety_reason": "정책상 거절 없이 안전하게 생성 가능합니다."}
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("llm", [UnsafeLlm(), RefusalLanguageLlm()])
+async def test_curate_persists_safety_rejection_and_does_not_retry(
+    tmp_path: Path, llm
+) -> None:
+    """Catch explicit or disguised safety failures reaching the next stage."""
+
+    candidate = make_candidate(1)
+    store, state = prepare_state(tmp_path, [candidate])
+    service = CurateService(store, state, llm)
+
+    first = await service.run(NOW)
+    second = await service.run(NOW)
+
+    assert first.evaluated == 1
+    assert first.passed == 0
+    assert first.safety_rejected == 1
+    assert second.evaluated == 0
+    assert store.read_curated() == []
+    assert state.stage2_terminal_ids() == {candidate.item_id}
+
+
+@pytest.mark.asyncio
+async def test_curate_does_not_reject_positive_policy_language(tmp_path: Path) -> None:
+    """Catch broad keyword matching that rejects an explicit no-refusal decision."""
+
+    candidate = make_candidate(1)
+    store, state = prepare_state(tmp_path, [candidate])
+    service = CurateService(store, state, PositivePolicyLanguageLlm())
+
+    report = await service.run(NOW)
+
+    assert report.passed == 1
+    assert report.safety_rejected == 0

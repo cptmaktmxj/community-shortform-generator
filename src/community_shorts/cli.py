@@ -3,7 +3,6 @@
 import argparse
 import asyncio
 import logging
-import os
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -12,9 +11,10 @@ from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 import httpx
+from dotenv import load_dotenv
 
 from community_shorts.adapters import build_adapter
-from community_shorts.config import AppConfig, ConfigError, load_sources
+from community_shorts.config import ConfigError, load_app_config, load_sources
 from community_shorts.curate import CurateService
 from community_shorts.http import HttpClient
 from community_shorts.ingest import IngestService
@@ -48,25 +48,25 @@ def build_parser() -> argparse.ArgumentParser:
 def _add_common_arguments(parser: argparse.ArgumentParser) -> None:
     """Add paths, LLM settings, and logging controls shared by commands."""
 
+    parser.add_argument("--config", type=Path, default=Path("config.yaml"))
     parser.add_argument("--sources", type=Path, default=Path("sources.yaml"))
     parser.add_argument("--data-dir", type=Path, default=Path("data"))
     parser.add_argument("--state-db", type=Path)
     parser.add_argument("--since-hours", type=float, default=24.0)
-    parser.add_argument("--llm-mode", choices=("openai", "fixture"), default="openai")
     parser.add_argument(
-        "--base-url",
-        default=os.getenv("CURATION_LLM_BASE_URL", "http://127.0.0.1:8000/v1"),
+        "--llm-mode",
+        choices=("openai", "fixture"),
+        default=None,
     )
-    parser.add_argument(
-        "--model",
-        default=os.getenv("CURATION_LLM_MODEL", "K-EXAONE-236B-A23B"),
-    )
+    parser.add_argument("--base-url")
+    parser.add_argument("--model")
     parser.add_argument("--log-level", choices=("DEBUG", "INFO", "WARNING", "ERROR"), default="INFO")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Parse arguments, execute the requested stages, and return a stable exit code."""
 
+    load_dotenv(dotenv_path=Path.cwd() / ".env", override=False)
     parser = build_parser()
     try:
         args = parser.parse_args(argv)
@@ -78,6 +78,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
     try:
+        runtime = load_app_config(args.config).resolve()
+        args.llm_mode = args.llm_mode or runtime.llm_mode
+        args.base_url = args.base_url or runtime.llm_base_url
+        args.model = args.model or runtime.llm_model
+        args.llm_api_key = runtime.llm_api_key
+        args.llm_timeout_seconds = runtime.llm_timeout_seconds
+        args.user_agent = runtime.user_agent
+        args.reddit_access_token = runtime.reddit_access_token
         return asyncio.run(_execute(args))
     except (ConfigError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
@@ -104,17 +112,16 @@ async def _execute(args: argparse.Namespace) -> int:
         enabled = [source for source in sources if source.enabled]
         if not enabled:
             raise ConfigError("At least one source must be enabled")
-        app_config = AppConfig(user_agent=os.getenv("COMMUNITY_USER_AGENT", AppConfig().user_agent))
         async with httpx.AsyncClient(follow_redirects=True) as raw_client:
             adapters = [
                 build_adapter(
                     source,
                     HttpClient(
                         raw_client,
-                        user_agent=app_config.user_agent,
+                        user_agent=args.user_agent,
                         rate_limit_seconds=source.rate_limit_seconds,
                     ),
-                    reddit_access_token=os.getenv("REDDIT_ACCESS_TOKEN"),
+                    reddit_access_token=args.reddit_access_token,
                 )
                 for source in enabled
             ]
@@ -134,15 +141,16 @@ async def _execute(args: argparse.Namespace) -> int:
         else:
             transport = OpenAiChatTransport(
                 base_url=args.base_url,
-                api_key=os.getenv("CURATION_LLM_API_KEY", "EMPTY"),
-                timeout_seconds=120.0,
+                api_key=args.llm_api_key,
+                timeout_seconds=args.llm_timeout_seconds,
             )
             llm = OpenAiLlmClient(transport=transport, model=args.model)
         report = await CurateService(store, state, llm).run(now)
         LOGGER.info(
-            "curate complete evaluated=%d passed=%d failed_items=%s",
+            "curate complete evaluated=%d passed=%d safety_rejected=%d failed_items=%s",
             report.evaluated,
             report.passed,
+            report.safety_rejected,
             report.failed_item_ids,
         )
     return 0

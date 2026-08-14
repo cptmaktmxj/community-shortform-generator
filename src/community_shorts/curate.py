@@ -21,7 +21,40 @@ class CurateReport:
 
     evaluated: int
     passed: int
+    safety_rejected: int
     failed_item_ids: list[str]
+
+
+REFUSAL_MARKERS = (
+    "도와드릴 수 없습니다",
+    "도와줄 수 없습니다",
+    "제공할 수 없습니다",
+    "지원할 수 없습니다",
+    "정책상 도와드릴 수",
+    "정책상 제공할 수",
+    "안전 정책에 따라 거절",
+    "안전 정책으로 인해",
+    "cannot assist",
+    "can't assist",
+    "unable to assist",
+    "cannot help",
+)
+
+
+def _contains_refusal_language(assessment: LlmAssessment) -> bool:
+    """Detect refusal or policy-warning language that must hard-fail safety."""
+
+    text = " ".join(
+        [
+            assessment.reason,
+            assessment.safety_reason,
+            assessment.summary,
+            assessment.key_claim,
+            *assessment.hook_points,
+            assessment.tone,
+        ]
+    ).casefold()
+    return any(marker.casefold() in text for marker in REFUSAL_MARKERS)
 
 
 class CurateService:
@@ -49,8 +82,8 @@ class CurateService:
     async def run(self, now: datetime) -> CurateReport:
         """Select new candidates and write only transformed Korean output."""
 
-        curated_ids = self._state.curated_ids()
-        raw_items = [item for item in self._storage.read_items() if item.item_id not in curated_ids]
+        terminal_ids = self._state.stage2_terminal_ids()
+        raw_items = [item for item in self._storage.read_items() if item.item_id not in terminal_ids]
         source_ids = {item.source_id for item in raw_items}
         geeknews_only = source_ids == {"geeknews"}
         candidates = prefilter(
@@ -61,9 +94,21 @@ class CurateService:
 
         assessed: list[tuple[ScoredRawItem, LlmAssessment, float]] = []
         failed_item_ids: list[str] = []
+        safety_rejected = 0
         for candidate in candidates:
             try:
                 assessment = await self._llm.assess(candidate)
+                refusal_detected = _contains_refusal_language(assessment)
+                if not assessment.safety_ok or refusal_detected:
+                    categories = ",".join(assessment.safety_categories)
+                    prefix = categories or "refusal_language"
+                    self._state.mark_safety_rejected(
+                        candidate.raw.item_id,
+                        at=now,
+                        reason=f"{prefix}: {assessment.safety_reason}",
+                    )
+                    safety_rejected += 1
+                    continue
                 score = curation_score(
                     candidate.reaction_score,
                     assessment.provocation_score,
@@ -72,7 +117,7 @@ class CurateService:
                 if passes_gates(
                     score=score,
                     fidelity=assessment.fidelity_score,
-                    safe=assessment.safe,
+                    safety_ok=assessment.safety_ok,
                 ):
                     assessed.append((candidate, assessment, score))
             except Exception:
@@ -94,6 +139,7 @@ class CurateService:
         return CurateReport(
             evaluated=len(candidates),
             passed=len(curated),
+            safety_rejected=safety_rejected,
             failed_item_ids=failed_item_ids,
         )
 
@@ -122,6 +168,9 @@ class CurateService:
             mass_appeal_score=assessment.mass_appeal_score,
             curation_score=round(score, 6),
             fidelity_score=assessment.fidelity_score,
+            safety_ok=True,
+            safety_reason=assessment.safety_reason,
+            safety_categories=assessment.safety_categories,
             curation_reason=assessment.reason,
             model=self._llm.model_name,
         )

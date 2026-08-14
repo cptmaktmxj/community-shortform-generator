@@ -1,0 +1,14 @@
+http:
+  user_agent: "community-shortform-generator/0.1 (contact: local-operator)"
+  user_agent_env: COMMUNITY_USER_AGENT
+
+llm:
+  mode: fixture
+  base_url: http://127.0.0.1:11434/v1
+  model: qwen3:8b
+  api_key_env: CURATION_LLM_API_KEY
+  api_key_default: ollama
+  timeout_seconds: 120
+
+reddit:
+  access_token_env: REDDIT_ACCESS_TOKEN

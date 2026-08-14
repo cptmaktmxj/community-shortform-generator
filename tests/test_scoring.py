@@ -24,10 +24,10 @@ def test_curation_score_uses_40_25_35_weights() -> None:
 
 
 def test_fidelity_below_point_75_fails_even_with_high_scores() -> None:
-    assert passes_gates(score=0.99, fidelity=0.74, safe=True) is False
-    assert passes_gates(score=0.61, fidelity=1.0, safe=True) is False
-    assert passes_gates(score=0.99, fidelity=1.0, safe=False) is False
-    assert passes_gates(score=0.62, fidelity=0.75, safe=True) is True
+    assert passes_gates(score=0.99, fidelity=0.74, safety_ok=True) is False
+    assert passes_gates(score=0.61, fidelity=1.0, safety_ok=True) is False
+    assert passes_gates(score=0.99, fidelity=1.0, safety_ok=False) is False
+    assert passes_gates(score=0.62, fidelity=0.75, safety_ok=True) is True
 
 
 def test_reaction_scores_use_source_local_percentiles() -> None:

@@ -14,25 +14,29 @@ Python 3.11 이상이 필요합니다.
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -e ".[test]"
+Copy-Item .env.example .env
 ```
 
-`.env`, 키, `credentials.json`, 가상환경, JSON 산출물과 SQLite 파일은 Git에서 제외됩니다.
+비밀이 아닌 실행 설정은 `config.yaml`에서 관리합니다. `.env`에는 `config.yaml`이 지정한 환경변수 이름에 대응하는 비밀값만 넣으며, CLI 시작 시 자동으로 로드됩니다. 이미 설정된 운영체제 환경변수는 `.env`가 덮어쓰지 않습니다. `.env`, 키, `credentials.json`, 가상환경, JSON 산출물과 SQLite 파일은 Git에서 제외됩니다.
 
 ## 실행
 
-외부 LLM 없이 전체 경계를 확인하려면 fixture 모드를 사용합니다.
+기본 개발 설정은 외부 LLM 없이 전체 경계를 확인하는 fixture 모드입니다.
 
 ```powershell
-python -m community_shorts run --llm-mode fixture --since-hours 168
+python -m community_shorts run --since-hours 168
 ```
 
-실제 Furiosa-LLM OpenAI 호환 서버를 사용할 때:
+선택적으로 Ollama를 설치한 경우 `config.yaml`의 `llm.mode`를 `openai`로 변경하면 같은 OpenAI 호환 클라이언트를 사용합니다.
 
 ```powershell
-$env:CURATION_LLM_BASE_URL = "http://127.0.0.1:8000/v1"
-$env:CURATION_LLM_MODEL = "K-EXAONE-236B-A23B"
-$env:CURATION_LLM_API_KEY = "EMPTY"
 python -m community_shorts run
+```
+
+임시 실행값은 설정 파일을 수정하지 않고 CLI에서 덮어쓸 수 있습니다.
+
+```powershell
+python -m community_shorts curate --llm-mode openai --base-url http://127.0.0.1:11434/v1 --model qwen3:8b
 ```
 
 각 단계는 독립 실행할 수 있습니다.

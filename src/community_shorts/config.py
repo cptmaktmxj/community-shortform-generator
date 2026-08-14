@@ -1,14 +1,15 @@
 """Load and validate pipeline configuration."""
 
+import os
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Mapping
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, ValidationError
 
 
 class ConfigError(ValueError):
-    """Raised when source configuration cannot be used safely."""
+    """Raised when pipeline configuration cannot be used safely."""
 
 
 class SourceConfig(BaseModel):
@@ -27,16 +28,82 @@ class SourceConfig(BaseModel):
     gallery_id: str | None = None
 
 
-class AppConfig(BaseModel):
-    """Runtime settings for storage and the local LLM endpoint."""
+class HttpConfig(BaseModel):
+    """HTTP identity and its optional environment override name."""
 
     model_config = ConfigDict(extra="forbid")
 
-    llm_base_url: str = "http://127.0.0.1:8000/v1"
-    llm_model: str = "K-EXAONE-236B-A23B"
-    llm_api_key: str = "EMPTY"
-    llm_timeout_seconds: float = Field(default=120.0, gt=0)
-    user_agent: str = "community-shortform-generator/0.1 (contact: local-operator)"
+    user_agent: str = Field(min_length=1)
+    user_agent_env: str = Field(pattern=r"^[A-Z][A-Z0-9_]*$")
+
+
+class LlmConfig(BaseModel):
+    """Non-secret LLM settings and the environment name holding its key."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["openai", "fixture"]
+    base_url: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    api_key_env: str = Field(pattern=r"^[A-Z][A-Z0-9_]*$")
+    api_key_default: str = Field(min_length=1)
+    timeout_seconds: float = Field(gt=0)
+
+
+class RedditConfig(BaseModel):
+    """Environment lookup configuration for Reddit OAuth credentials."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    access_token_env: str = Field(pattern=r"^[A-Z][A-Z0-9_]*$")
+
+
+class ResolvedAppConfig(BaseModel):
+    """Runtime values after resolving configured environment lookups."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    user_agent: str
+    llm_mode: Literal["openai", "fixture"]
+    llm_base_url: str
+    llm_model: str
+    llm_api_key: str
+    llm_timeout_seconds: float
+    reddit_access_token: str | None
+
+
+class AppConfig(BaseModel):
+    """Validated non-secret application configuration loaded from YAML."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    http: HttpConfig
+    llm: LlmConfig
+    reddit: RedditConfig
+
+    def resolve(self, environ: Mapping[str, str] | None = None) -> ResolvedAppConfig:
+        """Resolve secrets and overrides using environment names declared in YAML."""
+
+        values = os.environ if environ is None else environ
+        return ResolvedAppConfig(
+            user_agent=values.get(self.http.user_agent_env, self.http.user_agent),
+            llm_mode=self.llm.mode,
+            llm_base_url=self.llm.base_url,
+            llm_model=self.llm.model,
+            llm_api_key=values.get(self.llm.api_key_env, self.llm.api_key_default),
+            llm_timeout_seconds=self.llm.timeout_seconds,
+            reddit_access_token=values.get(self.reddit.access_token_env),
+        )
+
+
+def load_app_config(path: Path) -> AppConfig:
+    """Read and validate non-secret runtime configuration from YAML."""
+
+    try:
+        payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        return AppConfig.model_validate(payload)
+    except (OSError, yaml.YAMLError, ValidationError, AttributeError) as exc:
+        raise ConfigError(f"Invalid application configuration: {exc}") from exc
 
 
 def load_sources(path: Path) -> list[SourceConfig]:

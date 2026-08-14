@@ -16,6 +16,21 @@ class LlmResponseError(ValueError):
     """Raised after both schema parsing attempts fail."""
 
 
+def _load_json_with_single_closer_repair(content: str) -> Any:
+    """Repair only a JSON object missing its final brace after trailing whitespace."""
+
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError as original_error:
+        stripped = content.rstrip()
+        if stripped.startswith("{") and not stripped.endswith("}"):
+            try:
+                return json.loads(f"{stripped}}}")
+            except json.JSONDecodeError:
+                pass
+        raise original_error
+
+
 class ChatTransport(Protocol):
     """Minimal structured chat completion boundary used by the model client."""
 
@@ -75,7 +90,8 @@ class OpenAiChatTransport:
                     "schema": response_schema,
                 },
             },
-            temperature=0.1,
+            temperature=0,
+            max_completion_tokens=1024,
         )
         content = response.choices[0].message.content
         if not content:
@@ -101,7 +117,12 @@ class OpenAiLlmClient:
                 current_messages.append(
                     {
                         "role": "user",
-                        "content": "이전 응답은 유효한 JSON 스키마가 아닙니다. 설명 없이 올바른 JSON 객체만 다시 반환하세요.",
+                        "content": (
+                            "이전 응답은 유효한 JSON 스키마가 아닙니다. "
+                            "safety_reason, reason, summary, key_claim, hook_points, tone의 "
+                            "비어 있지 않은 텍스트는 반드시 한국어로 작성하세요. "
+                            "설명 없이 올바른 JSON 객체만 다시 반환하세요."
+                        ),
                     }
                 )
             content = await self._transport.complete(
@@ -110,7 +131,9 @@ class OpenAiLlmClient:
                 response_schema=LlmAssessment.model_json_schema(),
             )
             try:
-                return LlmAssessment.model_validate(json.loads(content))
+                return LlmAssessment.model_validate(
+                    _load_json_with_single_closer_repair(content)
+                )
             except (json.JSONDecodeError, ValidationError) as exc:
                 last_error = exc
         raise LlmResponseError(f"Invalid LLM JSON after one retry: {last_error}") from last_error
@@ -128,7 +151,9 @@ class FixtureLlmClient:
             provocation_score=0.95,
             mass_appeal_score=0.95,
             fidelity_score=0.95,
-            safe=True,
+            safety_ok=True,
+            safety_reason="일반적인 기술 뉴스 요약으로 안전하게 생성할 수 있습니다.",
+            safety_categories=[],
             reason="실제 반응과 대중적 관심 가능성이 충분한 시험 항목입니다.",
             summary=f"'{item.raw.title}'에 관한 핵심 내용을 한국어로 요약한 시험 결과입니다.",
             key_claim="커뮤니티에서 주목할 만한 변화나 논점이 제기됐습니다.",
