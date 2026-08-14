@@ -8,6 +8,7 @@ from typing import Sequence, TypeVar
 
 from pydantic import BaseModel
 
+from community_shorts.generation_models import GeneratedScript
 from community_shorts.models import CuratedItem, RawItem
 
 
@@ -21,6 +22,7 @@ class ArtifactStore:
         self.root = root
         self.items_path = root / "items.json"
         self.curated_path = root / "curated.json"
+        self.scripts_path = root / "scripts.json"
 
     def read_items(self) -> list[RawItem]:
         """Read the current Stage 1 artifact, returning an empty list if absent."""
@@ -50,6 +52,23 @@ class ArtifactStore:
         """Atomically replace the complete Stage 2 artifact without merging."""
 
         self._write_models(self.curated_path, sorted(items, key=lambda item: item.item_id))
+
+    def read_scripts(self) -> list[GeneratedScript]:
+        """Read completed Stage 3 scripts, returning an empty list if absent."""
+
+        return self._read_models(self.scripts_path, GeneratedScript)
+
+    def write_scripts(self, items: Sequence[GeneratedScript]) -> None:
+        """Merge completed scripts by ID and atomically replace the artifact."""
+
+        merged = {item.item_id: item for item in self.read_scripts()}
+        merged.update({item.item_id: item for item in items})
+        self._write_models(self.scripts_path, [merged[key] for key in sorted(merged)])
+
+    def replace_scripts(self, items: Sequence[GeneratedScript]) -> None:
+        """Atomically replace every completed Stage 3 script without merging."""
+
+        self._write_models(self.scripts_path, sorted(items, key=lambda item: item.item_id))
 
     def _read_models(self, path: Path, model_type: type[ModelT]) -> list[ModelT]:
         """Validate a JSON array against the requested artifact model."""
