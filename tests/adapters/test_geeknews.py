@@ -14,6 +14,7 @@ def test_geeknews_parser_maps_points_comments_and_topic_id(fixture_text) -> None
     assert items[0].metrics.likes == 42
     assert items[0].metrics.comments == 7
     assert str(items[0].url) == "https://news.hada.io/topic?id=12345"
+    assert items[0].title == "테스트 기술 소식"
     assert items[0].source_language == "ko"
 
 

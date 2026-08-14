@@ -33,17 +33,35 @@ def parse_listing(html: str, *, fetched_at: datetime) -> list[RawItem]:
     tree = HTMLParser(html)
     items: list[RawItem] = []
     for row in tree.css(".topic_row"):
-        title_node = row.css_first(".topictitle")
+        title_node = row.css_first(".topic-title-heading")
+        if title_node is None:
+            title_node = row.css_first(".topictitle")
         if title_node is None:
             continue
-        discussion = row.css_first(".topic-comments") or row.css_first('a[href*="/topic?id="]')
+        discussion = row.css_first("a[data-topic-comment-topic-id]")
+        if discussion is None:
+            discussion = row.css_first(".topic-comments")
+        if discussion is None:
+            discussion = row.css_first('a[href*="topic?id="]')
         discussion_href = discussion.attributes.get("href", "") if discussion else ""
-        row_id = row.attributes.get("data-id", "")
+        row_id = row.attributes.get("data-topic-state-id", "") or row.attributes.get("data-id", "")
         query_id = parse_qs(urlsplit(discussion_href).query).get("id", [""])[0]
         item_id = query_id or row_id
         if not item_id.isdigit():
             continue
-        comments_text = _text(discussion)
+        points_node = next(
+            (
+                span
+                for span in row.css(".topicinfo span")
+                if span.attributes.get("id", "").startswith("tp")
+            ),
+            None,
+        )
+        comments = _number(
+            discussion.attributes.get("data-topic-comment-count", "") if discussion else ""
+        )
+        if comments == 0:
+            comments = _number(_text(discussion))
         items.append(
             RawItem(
                 item_id=f"geeknews:{item_id}",
@@ -52,8 +70,8 @@ def parse_listing(html: str, *, fetched_at: datetime) -> list[RawItem]:
                 title=_text(title_node),
                 body=_text(row.css_first(".topicdesc")),
                 metrics=Metrics(
-                    likes=_number(_text(row.css_first(".votenum"))),
-                    comments=_number(comments_text),
+                    likes=_number(_text(points_node or row.css_first(".votenum"))),
+                    comments=comments,
                 ),
                 source_language="ko",
                 fetched_at=fetched_at,
