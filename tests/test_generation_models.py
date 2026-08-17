@@ -7,6 +7,7 @@ from community_shorts.generation_models import (
     ContentAnalysis,
     GeneratedScript,
     TitleCandidate,
+    TitleCandidatePool,
     TitlePackage,
 )
 
@@ -91,6 +92,30 @@ def test_title_package_requires_three_distinct_styles() -> None:
 
     with pytest.raises(ValidationError, match="three title styles"):
         TitlePackage(candidates=[repeated, repeated, repeated], selected_title=repeated.title)
+
+
+def test_title_candidate_pool_requires_five_distinct_editorial_angles() -> None:
+    """Catch a ranker pool that omits one requested title angle."""
+
+    script = "AI 도구가 반복 업무를 바꾸는 사실을 설명합니다."
+    base = valid_titles().candidates
+    pool = TitleCandidatePool(
+        candidates=base
+        + [
+            TitleCandidate(
+                style="curiosity_gap",
+                title="반복 업무에서 먼저 사라지는 한 가지",
+                supporting_script_excerpt=script,
+            ),
+            TitleCandidate(
+                style="strong_factual_statement",
+                title="AI가 반복 업무 단계를 실제로 바꾼다",
+                supporting_script_excerpt=script,
+            ),
+        ]
+    )
+
+    assert len(pool.candidates) == 5
 
 
 def test_generated_script_rejects_original_body() -> None:

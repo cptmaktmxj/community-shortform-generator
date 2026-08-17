@@ -3,7 +3,7 @@
 import json
 from typing import Literal
 
-from community_shorts.generation_models import ContentAnalysis
+from community_shorts.generation_models import ContentAnalysis, TitleCandidatePool
 from community_shorts.models import CuratedItem
 
 
@@ -128,6 +128,74 @@ def build_title_input(
                 "스타일은 direct_impact, question, conventional_wisdom_reversal을 "
                 "각각 한 번 사용하고, 근거가 되는 대본의 정확한 부분 문자열을 제시하세요.\n"
                 + json.dumps(title_context, ensure_ascii=False)
+            ),
+        },
+    ]
+
+
+def build_title_pool_input(
+    item: CuratedItem, analysis: ContentAnalysis, final_script: str
+) -> list[dict[str, str]]:
+    """Build a five-angle title request for independent GPT ranking."""
+
+    del item
+    title_context = {
+        "analysis": analysis.model_dump(mode="json"),
+        "final_script": final_script,
+    }
+    return [
+        {"role": "system", "content": _SHARED_SYSTEM_POLICY},
+        {
+            "role": "user",
+            "content": (
+                "최종 대본에 실제로 들어 있는 주장만 사용해 제목 다섯 개를 만드세요. "
+                "각 제목은 공백 포함 18~34자로 작성하세요. 스타일은 direct_impact, "
+                "question, conventional_wisdom_reversal, curiosity_gap, "
+                "strong_factual_statement를 각각 한 번 사용하세요. 각 후보마다 근거가 "
+                "되는 대본의 정확한 부분 문자열을 제시하세요. 강한 표현은 허용하지만 "
+                "대본에 없는 사실이나 인과관계는 만들지 마세요.\n"
+                + json.dumps(title_context, ensure_ascii=False)
+            ),
+        },
+    ]
+
+
+def build_title_judge_input(
+    item: CuratedItem,
+    analysis: ContentAnalysis,
+    final_script: str,
+    pool: TitleCandidatePool,
+) -> list[dict[str, str]]:
+    """Build an isolated structured review request for exactly five generated titles."""
+
+    del item
+    judge_context = {
+        "analysis": analysis.model_dump(mode="json"),
+        "final_script": final_script,
+        "candidates": [candidate.model_dump(mode="json") for candidate in pool.candidates],
+    }
+    return [
+        {
+            "role": "system",
+            "content": (
+                _SHARED_SYSTEM_POLICY
+                + "\n당신은 제목 생성자가 아니라 독립 심사자입니다. 입력 후보를 수정하거나 "
+                "새 제목을 만들지 말고 각 후보만 평가하세요."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                "후보 다섯 개를 모두 평가하세요. evidence_support는 제목의 핵심 주장이 "
+                "최종 대본에 직접 뒷받침되는 정도, clickbait_strength는 클릭을 유도하는 "
+                "호기심·자극의 강도, mass_appeal은 비기술 대중의 일상·업무·AI·테크주 "
+                "관심과 가까운 정도입니다. safety_ok는 이 제목과 대본을 일반 GPT에 "
+                "입력했을 때 거절·경고·'도와줄 수 없다'류 응답을 유발할 수준의 위험이 "
+                "없고, 직접 투자 지시·불법 실행 지침·노골적 유해 내용이 없을 때만 true로 "
+                "평가하세요. '충격', '무조건', '드디어 밝혀졌다' 같은 강한 문구 자체는 "
+                "허용하지만 대본에 없는 사실·수치·인과·확실성을 암시하면 evidence_support를 "
+                "낮추세요. reasoning은 한국어 한 문장으로 작성하세요.\n"
+                + json.dumps(judge_context, ensure_ascii=False)
             ),
         },
     ]

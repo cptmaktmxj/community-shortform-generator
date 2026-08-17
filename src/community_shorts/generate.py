@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 
+from community_shorts.clickbait.ranking import JudgedTitle, select_judged_titles
+
 from community_shorts.config import ScriptTimingConfig
 from community_shorts.duration import DurationEstimate, estimate_duration
 from community_shorts.generation_llm import (
@@ -14,7 +16,10 @@ from community_shorts.generation_llm import (
 from community_shorts.generation_models import (
     ContentAnalysis,
     GeneratedScript,
+    TitleCandidate,
+    TitleCandidatePool,
     TitlePackage,
+    TitleRankingScore,
 )
 from community_shorts.models import CuratedItem
 from community_shorts.state import StateStore
@@ -67,17 +72,42 @@ class _ItemOutcome:
 def validate_title_package(package: TitlePackage, script: str) -> TitlePackage:
     """Require bounded, supported titles without direct investment instructions."""
 
-    styles = {candidate.style for candidate in package.candidates}
-    titles = [candidate.title.strip() for candidate in package.candidates]
     required_styles = {
         "direct_impact",
         "question",
         "conventional_wisdom_reversal",
     }
-    if styles != required_styles or len(set(titles)) != 3:
-        raise TitleValidationError("three distinct title styles are required")
+    _validate_title_candidates(
+        package.candidates, script, required_styles=required_styles
+    )
+    return package
 
-    for candidate, title in zip(package.candidates, titles, strict=True):
+
+def validate_title_pool(pool: TitleCandidatePool, script: str) -> TitleCandidatePool:
+    """Apply the same hard evidence and safety gates before model ranking."""
+
+    required_styles = {
+        "direct_impact",
+        "question",
+        "conventional_wisdom_reversal",
+        "curiosity_gap",
+        "strong_factual_statement",
+    }
+    _validate_title_candidates(pool.candidates, script, required_styles=required_styles)
+    return pool
+
+
+def _validate_title_candidates(
+    candidates: list[TitleCandidate], script: str, *, required_styles: set[str]
+) -> None:
+    """Validate distinct styles, length, exact evidence, URLs, and investment commands."""
+
+    styles = {candidate.style for candidate in candidates}
+    titles = [candidate.title.strip() for candidate in candidates]
+    if styles != required_styles or len(set(titles)) != len(required_styles):
+        raise TitleValidationError("distinct required title styles are missing")
+
+    for candidate, title in zip(candidates, titles, strict=True):
         if not 18 <= len(title) <= 34:
             raise TitleValidationError("title length must be between 18 and 34 characters")
         excerpt = candidate.supporting_script_excerpt.strip()
@@ -88,7 +118,6 @@ def validate_title_package(package: TitlePackage, script: str) -> TitlePackage:
             raise TitleValidationError("titles and evidence must not contain URLs")
         if any(marker in title for marker in _INVESTMENT_INSTRUCTION_MARKERS):
             raise TitleValidationError("direct investment instructions are not allowed")
-    return package
 
 
 class GenerateService:
@@ -100,11 +129,14 @@ class GenerateService:
         state: StateStore,
         llm: GenerationLlmClient,
         timing: ScriptTimingConfig,
+        *,
+        gpt_title_ranking: bool = False,
     ) -> None:
         self.storage = storage
         self.state = state
         self.llm = llm
         self.timing = timing
+        self.gpt_title_ranking = gpt_title_ranking
 
     async def run(self, now: datetime, *, rebuild: bool = False) -> GenerateReport:
         """Generate all current curated items, isolating failures by item."""
@@ -260,10 +292,27 @@ class GenerateService:
             at=now,
         )
 
+        ranked_titles: list[JudgedTitle] | None = None
         try:
-            titles = await self.llm.title(item, analysis, script)
-            titles = validate_title_package(titles, script)
-        except (GenerationResponseError, TitleValidationError) as exc:
+            if not self.gpt_title_ranking:
+                titles = await self.llm.title(item, analysis, script)
+                titles = validate_title_package(titles, script)
+            else:
+                pool = await self.llm.title_pool(item, analysis, script)
+                pool = validate_title_pool(pool, script)
+                judgment = await self.llm.judge_titles(
+                    item, analysis, script, pool
+                )
+                ranked_titles = select_judged_titles(
+                    [candidate.title for candidate in pool.candidates], judgment
+                )
+                by_title = {candidate.title: candidate for candidate in pool.candidates}
+                selected_candidates = [by_title[item.title] for item in ranked_titles]
+                titles = TitlePackage(
+                    candidates=selected_candidates,
+                    selected_title=selected_candidates[0].title,
+                )
+        except (GenerationResponseError, TitleValidationError, ValueError, KeyError) as exc:
             self.state.save_generation_failure(
                 item.item_id,
                 status="title_failed",
@@ -286,6 +335,22 @@ class GenerateService:
             playback_speed=self.timing.playback_speed,
             title_candidates=[candidate.title for candidate in titles.candidates],
             selected_title=titles.selected_title,
+            title_ranking=(
+                [
+                    TitleRankingScore(
+                        title=item.title,
+                        evidence_support=item.evidence_support,
+                        clickbait_strength=item.clickbait_strength,
+                        mass_appeal=item.mass_appeal,
+                        safety_ok=item.safety_ok,
+                        combined_score=item.score,
+                        reasoning=item.reasoning,
+                    )
+                    for item in ranked_titles
+                ]
+                if ranked_titles is not None
+                else None
+            ),
             model=self.llm.model_name,
             generated_at=now,
         )

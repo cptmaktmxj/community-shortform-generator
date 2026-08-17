@@ -15,6 +15,9 @@ from community_shorts.generation_models import (
     ContentAnalysis,
     ScriptDraft,
     TitleCandidate,
+    TitleCandidateEvaluation,
+    TitleCandidatePool,
+    TitleJudgeResult,
     TitlePackage,
 )
 from community_shorts.models import CuratedItem
@@ -90,6 +93,44 @@ def valid_titles(script: str = "최종 검증된 한국어 대본입니다.") ->
     )
 
 
+def valid_title_pool(script: str) -> TitleCandidatePool:
+    """Return five evidence-supported title angles for judge tests."""
+
+    return TitleCandidatePool(
+        candidates=valid_titles(script).candidates
+        + [
+            TitleCandidate(
+                style="curiosity_gap",
+                title="반복 업무에서 가장 먼저 사라질 한 단계",
+                supporting_script_excerpt=script,
+            ),
+            TitleCandidate(
+                style="strong_factual_statement",
+                title="AI가 직장인의 반복 업무 방식을 바꾼다",
+                supporting_script_excerpt=script,
+            ),
+        ]
+    )
+
+
+def valid_title_judgment(pool: TitleCandidatePool) -> TitleJudgeResult:
+    """Return complete Korean structured evaluations for a title pool."""
+
+    return TitleJudgeResult(
+        evaluations=[
+            TitleCandidateEvaluation(
+                title=candidate.title,
+                evidence_support=0.9,
+                clickbait_strength=0.8,
+                mass_appeal=0.8,
+                safety_ok=True,
+                reasoning="대본 근거를 지키면서 대중적인 호기심을 유도합니다.",
+            )
+            for candidate in pool.candidates
+        ]
+    )
+
+
 class CapturingResponsesTransport:
     """Record parse calls and return a prevalidated response."""
 
@@ -154,6 +195,26 @@ async def test_title_payload_contains_final_script_and_not_original_summary() ->
     assert "18~34자" in payload
     assert transport.calls[0].output_type is TitlePackage
     assert transport.calls[0].max_output_tokens == 600
+
+
+@pytest.mark.asyncio
+async def test_title_judge_receives_only_final_script_and_generated_pool() -> None:
+    """Catch GPT judging different titles or relying on unvalidated source material."""
+
+    script = "최종 검증된 한국어 대본입니다."
+    pool = valid_title_pool(script)
+    transport = CapturingResponsesTransport(valid_title_judgment(pool))
+    client = OpenAiGenerationLlmClient(transport=transport, model="gpt-5.4-mini")
+
+    result = await client.judge_titles(curated_item(), valid_analysis(), script, pool)
+
+    payload = json.dumps(transport.calls[0].input, ensure_ascii=False)
+    assert script in payload
+    assert all(candidate.title in payload for candidate in pool.candidates)
+    assert curated_item().summary not in payload
+    assert "safety_ok" in payload
+    assert transport.calls[0].output_type is TitleJudgeResult
+    assert result.evaluations[0].reasoning
 
 
 @pytest.mark.asyncio
@@ -266,3 +327,7 @@ async def test_fixture_client_returns_supported_korean_outputs() -> None:
         candidate.supporting_script_excerpt in draft.script
         for candidate in titles.candidates
     )
+
+    pool = await client.title_pool(item, analysis, draft.script)
+    judgment = await client.judge_titles(item, analysis, draft.script, pool)
+    assert len(judgment.evaluations) == 5

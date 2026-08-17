@@ -14,6 +14,9 @@ from community_shorts.generation_models import (
     ContentAnalysis,
     ScriptDraft,
     TitleCandidate,
+    TitleCandidateEvaluation,
+    TitleCandidatePool,
+    TitleJudgeResult,
     TitlePackage,
 )
 from community_shorts.models import CuratedItem
@@ -144,6 +147,58 @@ class RecordingGenerationLlm:
         self.calls.append("title")
         return title_package(script=final_script)
 
+    async def title_pool(
+        self,
+        item: CuratedItem,
+        content_analysis: ContentAnalysis,
+        final_script: str,
+    ) -> TitleCandidatePool:
+        """Record and return five candidates for experimental local ranking."""
+
+        del item, content_analysis
+        self.calls.append("title_pool")
+        legacy = title_package(script=final_script)
+        return TitleCandidatePool(
+            candidates=legacy.candidates
+            + [
+                TitleCandidate(
+                    style="curiosity_gap",
+                    title="반복 업무에서 가장 먼저 사라질 한 단계",
+                    supporting_script_excerpt=final_script[:18],
+                ),
+                TitleCandidate(
+                    style="strong_factual_statement",
+                    title="AI가 직장인의 반복 업무 방식을 바꾼다",
+                    supporting_script_excerpt=final_script[:18],
+                ),
+            ]
+        )
+
+    async def judge_titles(
+        self,
+        item: CuratedItem,
+        content_analysis: ContentAnalysis,
+        final_script: str,
+        pool: TitleCandidatePool,
+    ) -> TitleJudgeResult:
+        """Record and return five safe structured GPT title evaluations."""
+
+        del item, content_analysis, final_script
+        self.calls.append("judge_titles")
+        return TitleJudgeResult(
+            evaluations=[
+                TitleCandidateEvaluation(
+                    title=candidate.title,
+                    evidence_support=0.95 - index * 0.01,
+                    clickbait_strength=0.90 - index * 0.05,
+                    mass_appeal=0.90 - index * 0.05,
+                    safety_ok=True,
+                    reasoning="대본의 사실을 유지하면서 대중적 호기심을 만듭니다.",
+                )
+                for index, candidate in enumerate(pool.candidates)
+            ]
+        )
+
 
 class FailingGenerationLlm(RecordingGenerationLlm):
     """Fail during analysis to exercise atomic rebuild preservation."""
@@ -156,8 +211,37 @@ class FailingGenerationLlm(RecordingGenerationLlm):
         raise RuntimeError("provider unavailable")
 
 
+class MostlyUnsafeTitleLlm(RecordingGenerationLlm):
+    """Return fewer than three safe title reviews."""
+
+    async def judge_titles(
+        self,
+        item: CuratedItem,
+        content_analysis: ContentAnalysis,
+        final_script: str,
+        pool: TitleCandidatePool,
+    ) -> TitleJudgeResult:
+        """Mark only two candidates safe so the title stage must fail closed."""
+
+        del item, content_analysis, final_script
+        self.calls.append("judge_titles")
+        return TitleJudgeResult(
+            evaluations=[
+                TitleCandidateEvaluation(
+                    title=candidate.title,
+                    evidence_support=0.95,
+                    clickbait_strength=0.9,
+                    mass_appeal=0.9,
+                    safety_ok=index < 2,
+                    reasoning="위험 가능성을 기준으로 보수적으로 판정했습니다.",
+                )
+                for index, candidate in enumerate(pool.candidates)
+            ]
+        )
+
+
 def prepared_service(
-    tmp_path: Path, llm: RecordingGenerationLlm
+    tmp_path: Path, llm: RecordingGenerationLlm, *, gpt_title_ranking: bool = False
 ) -> GenerateService:
     """Create a service with one current curated item."""
 
@@ -168,6 +252,7 @@ def prepared_service(
         StateStore(tmp_path / "state.sqlite"),
         llm,
         timing(),
+        gpt_title_ranking=gpt_title_ranking,
     )
 
 
@@ -251,6 +336,42 @@ async def test_title_retry_reuses_saved_analysis_and_script(tmp_path: Path) -> N
     await service.run(NOW)
 
     assert llm.calls == ["title"]
+
+
+@pytest.mark.asyncio
+async def test_experimental_ranker_uses_five_candidates_and_persists_top_three(
+    tmp_path: Path,
+) -> None:
+    """Catch the local ranker being skipped or five internal candidates leaking publicly."""
+
+    llm = RecordingGenerationLlm(script=ideal_length_script())
+    service = prepared_service(tmp_path, llm, gpt_title_ranking=True)
+
+    report = await service.run(NOW)
+
+    generated = service.storage.read_scripts()[0]
+    assert llm.calls == ["analyze", "draft", "title_pool", "judge_titles"]
+    assert report.completed == 1
+    assert len(generated.title_candidates) == 3
+    assert generated.title_ranking is not None
+    assert generated.title_ranking[0].clickbait_strength == 0.90
+
+
+@pytest.mark.asyncio
+async def test_gpt_ranked_titles_fail_closed_when_fewer_than_three_are_safe(
+    tmp_path: Path,
+) -> None:
+    """Catch safety-rejected candidates being backfilled merely to complete output."""
+
+    llm = MostlyUnsafeTitleLlm(script=ideal_length_script())
+    service = prepared_service(tmp_path, llm, gpt_title_ranking=True)
+
+    report = await service.run(NOW)
+
+    assert report.title_failed == 1
+    assert service.storage.read_scripts() == []
+    job = service.state.load_generation_job("geeknews:1")
+    assert job is not None and job.status == "title_failed"
 
 
 def test_title_validation_allows_strong_words_with_exact_script_evidence() -> None:

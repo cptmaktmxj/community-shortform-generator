@@ -19,6 +19,8 @@ TitleStyle = Literal[
     "direct_impact",
     "question",
     "conventional_wisdom_reversal",
+    "curiosity_gap",
+    "strong_factual_statement",
 ]
 DurationClass = Literal["ideal", "acceptable"]
 GenerationStatus = Literal[
@@ -110,20 +112,85 @@ class TitlePackage(StrictModel):
 
     @model_validator(mode="after")
     def require_three_distinct_styles(self) -> "TitlePackage":
-        """Require every approved title style exactly once and a valid selection."""
+        """Require three distinct approved styles and a valid selection."""
+
+        styles = {candidate.style for candidate in self.candidates}
+        titles = [candidate.title for candidate in self.candidates]
+        if len(styles) != 3 or len(set(titles)) != 3:
+            raise ValueError("three title styles and distinct titles are required")
+        if self.selected_title not in titles:
+            raise ValueError("selected_title must match one candidate")
+        return self
+
+
+class TitleCandidatePool(StrictModel):
+    """Five distinct editorial angles generated for independent GPT review."""
+
+    candidates: list[TitleCandidate] = Field(min_length=5, max_length=5)
+
+    @model_validator(mode="after")
+    def require_five_distinct_styles(self) -> "TitleCandidatePool":
+        """Require every ranked-title style exactly once."""
 
         required_styles = {
             "direct_impact",
             "question",
             "conventional_wisdom_reversal",
+            "curiosity_gap",
+            "strong_factual_statement",
         }
         styles = {candidate.style for candidate in self.candidates}
         titles = [candidate.title for candidate in self.candidates]
-        if styles != required_styles or len(set(titles)) != 3:
-            raise ValueError("three title styles and distinct titles are required")
-        if self.selected_title not in titles:
-            raise ValueError("selected_title must match one candidate")
+        if styles != required_styles or len(set(titles)) != 5:
+            raise ValueError("five title styles and distinct titles are required")
         return self
+
+
+class TitleCandidateEvaluation(StrictModel):
+    """GPT judge scores for one generated title candidate."""
+
+    title: str = Field(min_length=1)
+    evidence_support: float = Field(ge=0, le=1)
+    clickbait_strength: float = Field(ge=0, le=1)
+    mass_appeal: float = Field(ge=0, le=1)
+    safety_ok: bool
+    reasoning: str = Field(min_length=1)
+
+    @field_validator("reasoning")
+    @classmethod
+    def require_korean_reasoning(cls, value: str) -> str:
+        """Keep the persisted editorial audit understandable in Korean."""
+
+        if not _contains_korean(value):
+            raise ValueError("title evaluation reasoning must contain Korean text")
+        return value
+
+
+class TitleJudgeResult(StrictModel):
+    """Exactly five distinct structured evaluations from the GPT judge."""
+
+    evaluations: list[TitleCandidateEvaluation] = Field(min_length=5, max_length=5)
+
+    @model_validator(mode="after")
+    def require_distinct_evaluated_titles(self) -> "TitleJudgeResult":
+        """Reject duplicate reviews that leave a generated candidate unevaluated."""
+
+        titles = [evaluation.title for evaluation in self.evaluations]
+        if len(set(titles)) != 5:
+            raise ValueError("five distinct title evaluations are required")
+        return self
+
+
+class TitleRankingScore(StrictModel):
+    """Auditable GPT judge scores for one public ranked title."""
+
+    title: str = Field(min_length=1)
+    evidence_support: float = Field(ge=0, le=1)
+    clickbait_strength: float = Field(ge=0, le=1)
+    mass_appeal: float = Field(ge=0, le=1)
+    safety_ok: bool
+    combined_score: float = Field(ge=0, le=1)
+    reasoning: str = Field(min_length=1)
 
 
 class GeneratedScript(StrictModel):
@@ -139,6 +206,9 @@ class GeneratedScript(StrictModel):
     playback_speed: float = Field(gt=0)
     title_candidates: list[str] = Field(min_length=3, max_length=3)
     selected_title: str = Field(min_length=1)
+    title_ranking: list[TitleRankingScore] | None = Field(
+        default=None, min_length=3, max_length=3
+    )
     model: str = Field(min_length=1)
     generated_at: datetime
 

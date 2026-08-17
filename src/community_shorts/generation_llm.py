@@ -10,6 +10,9 @@ from community_shorts.generation_models import (
     ContentAnalysis,
     ScriptDraft,
     TitleCandidate,
+    TitleCandidateEvaluation,
+    TitleCandidatePool,
+    TitleJudgeResult,
     TitlePackage,
 )
 from community_shorts.generation_prompts import (
@@ -17,6 +20,8 @@ from community_shorts.generation_prompts import (
     build_draft_input,
     build_revision_input,
     build_title_input,
+    build_title_judge_input,
+    build_title_pool_input,
 )
 from community_shorts.models import CuratedItem
 
@@ -72,6 +77,20 @@ class GenerationLlmClient(Protocol):
     ) -> TitlePackage:
         """Create titles supported by the final validated narration."""
 
+    async def title_pool(
+        self, item: CuratedItem, analysis: ContentAnalysis, final_script: str
+    ) -> TitleCandidatePool:
+        """Create five title angles for independent GPT ranking."""
+
+    async def judge_titles(
+        self,
+        item: CuratedItem,
+        analysis: ContentAnalysis,
+        final_script: str,
+        pool: TitleCandidatePool,
+    ) -> TitleJudgeResult:
+        """Independently score every generated title using structured GPT output."""
+
 
 class OpenAiResponsesTransport:
     """Call the official OpenAI Responses API with Pydantic Structured Outputs."""
@@ -111,7 +130,7 @@ class OpenAiResponsesTransport:
 
 
 class OpenAiGenerationLlmClient:
-    """Run four schema-bound GPT calls with one corrective retry per call."""
+    """Run isolated schema-bound GPT calls with one corrective retry per call."""
 
     def __init__(self, *, transport: ResponsesTransport, model: str) -> None:
         self._transport = transport
@@ -173,6 +192,38 @@ class OpenAiGenerationLlmClient:
             max_output_tokens=600,
             response_validator=lambda package: _validate_title_evidence(
                 package, final_script
+            ),
+        )
+
+    async def title_pool(
+        self, item: CuratedItem, analysis: ContentAnalysis, final_script: str
+    ) -> TitleCandidatePool:
+        """Generate five evidence-supported candidates for GPT review."""
+
+        return await self._request(
+            input=build_title_pool_input(item, analysis, final_script),
+            output_type=TitleCandidatePool,
+            max_output_tokens=900,
+            response_validator=lambda pool: _validate_title_evidence(
+                pool, final_script
+            ),
+        )
+
+    async def judge_titles(
+        self,
+        item: CuratedItem,
+        analysis: ContentAnalysis,
+        final_script: str,
+        pool: TitleCandidatePool,
+    ) -> TitleJudgeResult:
+        """Run a separate schema-bound GPT review over the five candidates."""
+
+        return await self._request(
+            input=build_title_judge_input(item, analysis, final_script, pool),
+            output_type=TitleJudgeResult,
+            max_output_tokens=1200,
+            response_validator=lambda judgment: _validate_title_judgment(
+                judgment, pool
             ),
         )
 
@@ -304,6 +355,53 @@ class FixtureGenerationLlmClient:
             selected_title="직장인의 반복 업무를 바꾸는 AI",
         )
 
+    async def title_pool(
+        self, item: CuratedItem, analysis: ContentAnalysis, final_script: str
+    ) -> TitleCandidatePool:
+        """Return five deterministic title styles for offline ranker tests."""
+
+        package = await self.title(item, analysis, final_script)
+        evidence = _first_evidence_excerpt(final_script)
+        return TitleCandidatePool(
+            candidates=package.candidates
+            + [
+                TitleCandidate(
+                    style="curiosity_gap",
+                    title="반복 업무에서 가장 먼저 사라질 한 단계",
+                    supporting_script_excerpt=evidence,
+                ),
+                TitleCandidate(
+                    style="strong_factual_statement",
+                    title="AI가 직장인의 반복 업무 방식을 바꾼다",
+                    supporting_script_excerpt=evidence,
+                ),
+            ]
+        )
+
+    async def judge_titles(
+        self,
+        item: CuratedItem,
+        analysis: ContentAnalysis,
+        final_script: str,
+        pool: TitleCandidatePool,
+    ) -> TitleJudgeResult:
+        """Return deterministic safe GPT-style scores for offline tests."""
+
+        del item, analysis, final_script
+        return TitleJudgeResult(
+            evaluations=[
+                TitleCandidateEvaluation(
+                    title=candidate.title,
+                    evidence_support=max(0.80, 0.96 - index * 0.02),
+                    clickbait_strength=max(0.60, 0.90 - index * 0.05),
+                    mass_appeal=max(0.60, 0.88 - index * 0.04),
+                    safety_ok=True,
+                    reasoning="대본의 사실을 유지하면서 대중의 호기심을 유도합니다.",
+                )
+                for index, candidate in enumerate(pool.candidates)
+            ]
+        )
+
 
 def _first_evidence_excerpt(script: str) -> str:
     """Return a nonempty Korean prefix that is an exact script substring."""
@@ -314,7 +412,9 @@ def _first_evidence_excerpt(script: str) -> str:
     return script
 
 
-def _validate_title_evidence(package: TitlePackage, final_script: str) -> None:
+def _validate_title_evidence(
+    package: TitlePackage | TitleCandidatePool, final_script: str
+) -> None:
     """Reject title evidence that is not an exact final-script substring."""
 
     if any(
@@ -323,4 +423,17 @@ def _validate_title_evidence(package: TitlePackage, final_script: str) -> None:
     ):
         raise GenerationResponseError(
             "title evidence must be an exact final-script substring"
+        )
+
+
+def _validate_title_judgment(
+    judgment: TitleJudgeResult, pool: TitleCandidatePool
+) -> None:
+    """Reject reviews that omit, replace, or duplicate generated candidates."""
+
+    expected = {candidate.title for candidate in pool.candidates}
+    actual = {evaluation.title for evaluation in judgment.evaluations}
+    if actual != expected:
+        raise GenerationResponseError(
+            "title judgment must evaluate exactly the generated candidates"
         )

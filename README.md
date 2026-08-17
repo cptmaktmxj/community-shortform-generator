@@ -1,6 +1,6 @@
 # Community Shortform Generator
 
-커뮤니티 신규 글과 댓글을 수집하고, 반응·자극도·대중성을 기준으로 선별해 한국어로 요약하는 Stage 1–2 파이프라인입니다. 대본·제목 생성과 게시 자동화(Stage 3)는 포함하지 않습니다.
+커뮤니티 신규 글과 댓글을 수집하고, 반응·자극도·대중성을 기준으로 선별해 한국어로 요약한 뒤 한국어 숏폼 대본과 제목을 생성하는 Stage 1–3 파이프라인입니다. 게시 자동화는 포함하지 않습니다.
 
 ## 지원 소스
 
@@ -44,9 +44,16 @@ python -m community_shorts curate --llm-mode openai --base-url http://127.0.0.1:
 ```powershell
 python -m community_shorts ingest --since-hours 24
 python -m community_shorts curate --llm-mode fixture
+python -m community_shorts generate --llm-mode fixture
 ```
 
-출력은 `data/items.json`, `data/curated.json`, `data/state.sqlite`입니다. `curated.json`에는 원문 본문과 댓글 전문이 들어가지 않습니다.
+Stage 3의 기본 제목 모드는 `gpt-ranked`입니다. `gpt-5.4-mini`가 대본 기반 후보 5개를 만든 다음 별도의 구조화된 심사 호출이 근거성·클릭베이트 강도·대중성·safety-ok를 평가합니다. 로컬 하드 게이트를 통과한 상위 3개만 저장되며, 3개 미만이면 해당 항목은 `title_failed`가 됩니다. 실제 OpenAI 호출에는 `.env`의 `OPENAI_API_KEY`가 필요합니다.
+
+```powershell
+python -m community_shorts generate --model gpt-5.4-mini --title-mode gpt-ranked
+```
+
+이전 3후보 방식을 재현해야 할 때만 `--title-mode legacy`를 사용합니다. 출력은 `data/items.json`, `data/curated.json`, `data/scripts.json`, `data/state.sqlite`입니다. `curated.json`과 `scripts.json`에는 원문 본문과 댓글 전문이 들어가지 않습니다.
 
 ## 운영 기본값
 
@@ -55,7 +62,7 @@ python -m community_shorts curate --llm-mode fixture
 - 프리필터: 회차당 20개, 소스당 5개
 - GeekNews 단독 시험: 최대 10개
 - 결과: 회차당 2개, 목표 6개/일, 최대 8개/일
-- 선별 점수: 반응 40% + 자극도 25% + 대중성 35%
+- 선별 점수: 반응 20% + 자극도 40% + 대중성 40%
 - 통과 기준: 선별 점수 0.62 이상, 원문 충실도 0.75 이상, 안전성 통과
 
 Linux cron 예시:
