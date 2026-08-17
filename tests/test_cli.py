@@ -67,7 +67,9 @@ def test_generate_parser_defaults_to_gpt_ranked_titles() -> None:
     assert args.title_mode == "gpt-ranked"
 
 
-def test_generate_command_runs_stage_three_with_fixture_model(tmp_path) -> None:
+def test_generate_command_runs_stage_three_with_fixture_model(
+    tmp_path, capsys
+) -> None:
     """Catch the Stage 3 CLI failing to compose timing and generation dependencies."""
 
     data_dir = tmp_path / "data"
@@ -87,3 +89,8 @@ def test_generate_command_runs_stage_three_with_fixture_model(tmp_path) -> None:
 
     assert exit_code == 0
     assert len(ArtifactStore(data_dir).read_scripts()) == 1
+    output = capsys.readouterr().out
+    assert "분석 중" in output
+    assert "스크립트 생성 중" in output
+    assert "제목 후보 생성 중" in output
+    assert "제목 생성 완료" in output

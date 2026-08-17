@@ -7,6 +7,7 @@ from datetime import datetime
 from community_shorts.llm import LlmClient
 from community_shorts.models import CuratedItem, LlmAssessment
 from community_shorts.prefilter import ScoredRawItem, prefilter
+from community_shorts.progress import NullProgress, ProgressEvent, ProgressSink
 from community_shorts.scoring import curation_score, passes_gates
 from community_shorts.state import StateStore
 from community_shorts.storage import ArtifactStore
@@ -71,6 +72,7 @@ class CurateService:
         state: StateStore,
         llm: LlmClient,
         *,
+        progress: ProgressSink | None = None,
         global_limit: int = 20,
         per_source_limit: int = 5,
         cycle_limit: int = 2,
@@ -79,6 +81,7 @@ class CurateService:
         self._storage = storage
         self._state = state
         self._llm = llm
+        self._progress = progress or NullProgress()
         self._global_limit = global_limit
         self._per_source_limit = per_source_limit
         self._cycle_limit = cycle_limit
@@ -96,12 +99,30 @@ class CurateService:
             global_limit=10 if geeknews_only else self._global_limit,
             per_source_limit=10 if geeknews_only else self._per_source_limit,
         )
+        self._progress.emit(
+            ProgressEvent(
+                stage="curate",
+                status="running",
+                message="선별 시작",
+                detail=f"평가 후보 {len(candidates)}개",
+            )
+        )
 
         assessed: list[tuple[ScoredRawItem, LlmAssessment, float]] = []
         failed_item_ids: list[str] = []
         safety_rejected = 0
         safety_rejections: dict[str, str] = {}
-        for candidate in candidates:
+        for position, candidate in enumerate(candidates, start=1):
+            self._progress.emit(
+                ProgressEvent(
+                    stage="curate",
+                    status="running",
+                    message="선별 중",
+                    current=position,
+                    total=len(candidates),
+                    detail=candidate.raw.item_id,
+                )
+            )
             try:
                 assessment = await self._llm.assess(candidate)
                 refusal_detected = _contains_refusal_language(assessment)
@@ -118,29 +139,76 @@ class CurateService:
                             reason=rejection_reason,
                         )
                     safety_rejected += 1
+                    self._progress.emit(
+                        ProgressEvent(
+                            stage="curate",
+                            status="failed",
+                            message="안전성 기준 탈락",
+                            current=position,
+                            total=len(candidates),
+                            detail=candidate.raw.item_id,
+                        )
+                    )
                     continue
                 score = curation_score(
                     candidate.reaction_score,
                     assessment.provocation_score,
                     assessment.mass_appeal_score,
                 )
-                if passes_gates(
+                passed = passes_gates(
                     score=score,
                     provocation=assessment.provocation_score,
                     mass_appeal=assessment.mass_appeal_score,
                     fidelity=assessment.fidelity_score,
                     safety_ok=assessment.safety_ok,
-                ):
+                )
+                if passed:
                     assessed.append((candidate, assessment, score))
+                self._progress.emit(
+                    ProgressEvent(
+                        stage="curate",
+                        status="completed",
+                        message="선별 평가 통과" if passed else "선별 평가 완료",
+                        current=position,
+                        total=len(candidates),
+                        detail=f"{candidate.raw.item_id} · 점수 {score:.3f}",
+                    )
+                )
             except Exception:
                 failed_item_ids.append(candidate.raw.item_id)
                 LOGGER.exception("LLM assessment failed", extra={"item_id": candidate.raw.item_id})
+                self._progress.emit(
+                    ProgressEvent(
+                        stage="curate",
+                        status="failed",
+                        message="선별 평가 실패",
+                        current=position,
+                        total=len(candidates),
+                        detail=candidate.raw.item_id,
+                    )
+                )
 
         if rebuild and failed_item_ids:
+            self._progress.emit(
+                ProgressEvent(
+                    stage="curate",
+                    status="failed",
+                    message="선별 재생성 실패",
+                    detail=f"실패 {len(failed_item_ids)}개",
+                )
+            )
             raise RebuildIncompleteError(
                 f"Stage 2 rebuild failed for {len(failed_item_ids)} candidate(s)"
             )
         if candidates and len(failed_item_ids) == len(candidates):
+            self._progress.emit(
+                ProgressEvent(
+                    stage="curate",
+                    status="failed",
+                    message="전체 선별 실패",
+                    detail=f"실패 {len(failed_item_ids)}개",
+                )
+            )
             raise RuntimeError("All LLM assessments failed")
 
         assessed.sort(
@@ -163,13 +231,26 @@ class CurateService:
         elif curated:
             self._storage.write_curated(curated)
             self._state.mark_curated([item.item_id for item in curated], at=now)
-        return CurateReport(
+        report = CurateReport(
             evaluated=len(candidates),
             passed=len(curated),
             safety_rejected=safety_rejected,
             failed_item_ids=failed_item_ids,
             rebuilt=rebuild,
         )
+        self._progress.emit(
+            ProgressEvent(
+                stage="curate",
+                status="completed",
+                message="선별 완료",
+                detail=(
+                    f"평가 {report.evaluated}개 · 통과 {report.passed}개 · "
+                    f"안전성 탈락 {report.safety_rejected}개 · "
+                    f"실패 {len(report.failed_item_ids)}개"
+                ),
+            )
+        )
+        return report
 
     def _to_curated(
         self,

@@ -6,6 +6,7 @@ import pytest
 from community_shorts.curate import CurateService, RebuildIncompleteError
 from community_shorts.llm import FixtureLlmClient
 from community_shorts.models import LlmAssessment, Metrics, RawItem
+from community_shorts.progress import ProgressEvent
 from community_shorts.state import StateStore
 from community_shorts.storage import ArtifactStore
 
@@ -82,6 +83,38 @@ class RecordingFixtureLlm(FixtureLlmClient):
     async def assess(self, item):
         self.seen_ids.append(item.raw.item_id)
         return await super().assess(item)
+
+
+class RecordingProgress:
+    """Collect Stage 2 state transitions."""
+
+    def __init__(self) -> None:
+        self.events: list[ProgressEvent] = []
+
+    def emit(self, event: ProgressEvent) -> None:
+        """Record one progress event."""
+
+        self.events.append(event)
+
+
+@pytest.mark.asyncio
+async def test_curate_reports_selection_progress_and_completion(tmp_path: Path) -> None:
+    """Catch Stage 2 appearing idle while candidates are evaluated."""
+
+    candidates = [make_candidate(1), make_candidate(2)]
+    store, state = prepare_state(tmp_path, candidates)
+    progress = RecordingProgress()
+
+    await CurateService(
+        store, state, FixtureLlmClient(), progress=progress
+    ).run(NOW)
+
+    messages = [event.message for event in progress.events]
+    assert messages[0] == "선별 시작"
+    assert messages.count("선별 중") == 2
+    assert messages[-1] == "선별 완료"
+    in_progress = [event for event in progress.events if event.message == "선별 중"]
+    assert [(event.current, event.total) for event in in_progress] == [(1, 2), (2, 2)]
 
 
 @pytest.mark.asyncio

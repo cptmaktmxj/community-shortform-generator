@@ -55,6 +55,16 @@ python -m community_shorts generate --model gpt-5.4-mini --title-mode gpt-ranked
 
 이전 3후보 방식을 재현해야 할 때만 `--title-mode legacy`를 사용합니다. 출력은 `data/items.json`, `data/curated.json`, `data/scripts.json`, `data/state.sqlite`입니다. `curated.json`과 `scripts.json`에는 원문 본문과 댓글 전문이 들어가지 않습니다.
 
+CLI 실행 중에는 현재 상태와 진행률이 즉시 출력됩니다. 실제 터미널에서는 진행·완료·실패 상태를 색으로 구분하고, 리다이렉트된 로그에는 ANSI 색상 코드를 넣지 않습니다.
+
+```text
+[21:05:09] [수집] [1/1] news.hada.io 글 수집 중
+[21:05:11] [수집] [1/1] news.hada.io 수집 완료 · 확인 10개 · 신규 8개 · 중복 2개
+[21:05:12] [선별] [1/8] 선별 중 · geeknews:12345
+[21:05:18] [생성] [1/2] 스크립트 생성 중 · geeknews:12345
+[21:05:25] [생성] [1/2] 제목 심사 중 · geeknews:12345 · 후보 5개
+```
+
 ## 운영 기본값
 
 - 수집: 30분마다

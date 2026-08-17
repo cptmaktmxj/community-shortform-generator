@@ -25,6 +25,7 @@ from community_shorts.generation_llm import (
 from community_shorts.http import HttpClient
 from community_shorts.ingest import IngestService
 from community_shorts.llm import FixtureLlmClient, OpenAiChatTransport, OpenAiLlmClient
+from community_shorts.progress import ConsoleProgress
 from community_shorts.state import StateStore
 from community_shorts.storage import ArtifactStore
 
@@ -132,6 +133,7 @@ async def _execute(args: argparse.Namespace) -> int:
     store = ArtifactStore(data_dir)
     state = StateStore(state_path)
     now = datetime.now(SEOUL)
+    progress = ConsoleProgress()
 
     if args.command == "generate":
         if args.llm_mode == "fixture":
@@ -153,6 +155,7 @@ async def _execute(args: argparse.Namespace) -> int:
             generation_llm,
             args.script_timing,
             gpt_title_ranking=args.title_mode == "gpt-ranked",
+            progress=progress,
         ).run(now, rebuild=args.rebuild)
         LOGGER.info(
             "generate complete attempted=%d completed=%d duration_failed=%d title_failed=%d",
@@ -181,7 +184,16 @@ async def _execute(args: argparse.Namespace) -> int:
                 )
                 for source in enabled
             ]
-            report = await IngestService(adapters, store, state).run(
+            report = await IngestService(
+                adapters,
+                store,
+                state,
+                progress=progress,
+                source_names={
+                    source.source_id: urlsplit(str(source.url)).netloc
+                    for source in enabled
+                },
+            ).run(
                 now - timedelta(hours=args.since_hours)
             )
             LOGGER.info(
@@ -201,7 +213,9 @@ async def _execute(args: argparse.Namespace) -> int:
                 timeout_seconds=args.llm_timeout_seconds,
             )
             llm = OpenAiLlmClient(transport=transport, model=args.model)
-        report = await CurateService(store, state, llm).run(now)
+        report = await CurateService(
+            store, state, llm, progress=progress
+        ).run(now)
         LOGGER.info(
             "curate complete evaluated=%d passed=%d safety_rejected=%d failed_items=%s",
             report.evaluated,

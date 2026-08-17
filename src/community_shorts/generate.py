@@ -22,6 +22,7 @@ from community_shorts.generation_models import (
     TitleRankingScore,
 )
 from community_shorts.models import CuratedItem
+from community_shorts.progress import NullProgress, ProgressEvent, ProgressSink
 from community_shorts.state import StateStore
 from community_shorts.storage import ArtifactStore
 
@@ -131,18 +132,28 @@ class GenerateService:
         timing: ScriptTimingConfig,
         *,
         gpt_title_ranking: bool = False,
+        progress: ProgressSink | None = None,
     ) -> None:
         self.storage = storage
         self.state = state
         self.llm = llm
         self.timing = timing
         self.gpt_title_ranking = gpt_title_ranking
+        self.progress = progress or NullProgress()
 
     async def run(self, now: datetime, *, rebuild: bool = False) -> GenerateReport:
         """Generate all current curated items, isolating failures by item."""
 
         curated = self.storage.read_curated()
         current_ids = [item.item_id for item in curated]
+        self.progress.emit(
+            ProgressEvent(
+                stage="generate",
+                status="running",
+                message="대본·제목 생성 시작",
+                detail=f"대상 {len(curated)}개",
+            )
+        )
         if rebuild:
             self.state.reset_generation_jobs(current_ids)
 
@@ -152,13 +163,25 @@ class GenerateService:
         failed_ids: list[str] = []
         completed: list[tuple[GeneratedScript, TitlePackage]] = []
 
-        for item in curated:
+        for position, item in enumerate(curated, start=1):
             job = self.state.load_generation_job(item.item_id)
             if not rebuild and job is not None and job.status == "completed":
+                self._emit_item(
+                    "생성 결과 재사용",
+                    item,
+                    position=position,
+                    total=len(curated),
+                    status="completed",
+                )
                 continue
             attempted += 1
             try:
-                outcome = await self._generate_item(item, now)
+                outcome = await self._generate_item(
+                    item,
+                    now,
+                    position=position,
+                    total=len(curated),
+                )
                 if outcome.status == "duration_failed":
                     duration_failed += 1
                     continue
@@ -189,6 +212,14 @@ class GenerateService:
                     at=now,
                 )
                 failed_ids.append(item.item_id)
+                self._emit_item(
+                    "항목 생성 실패",
+                    item,
+                    position=position,
+                    total=len(curated),
+                    status="failed",
+                    detail=exc.substage,
+                )
 
         if rebuild:
             if completed or not curated:
@@ -199,9 +230,17 @@ class GenerateService:
                     )
 
         if attempted > 0 and len(failed_ids) == attempted:
+            self.progress.emit(
+                ProgressEvent(
+                    stage="generate",
+                    status="failed",
+                    message="전체 생성 실패",
+                    detail=f"실패 {len(failed_ids)}개",
+                )
+            )
             raise RuntimeError("All Stage 3 generations failed")
 
-        return GenerateReport(
+        report = GenerateReport(
             attempted=attempted,
             completed=len(completed),
             duration_failed=duration_failed,
@@ -209,21 +248,60 @@ class GenerateService:
             failed_item_ids=tuple(failed_ids),
             rebuilt=rebuild,
         )
+        self.progress.emit(
+            ProgressEvent(
+                stage="generate",
+                status="completed",
+                message="전체 생성 완료",
+                detail=(
+                    f"완료 {report.completed}개 · 길이 실패 {report.duration_failed}개 · "
+                    f"제목 실패 {report.title_failed}개 · 오류 {len(report.failed_item_ids)}개"
+                ),
+            )
+        )
+        return report
 
     async def _generate_item(
-        self, item: CuratedItem, now: datetime
+        self,
+        item: CuratedItem,
+        now: datetime,
+        *,
+        position: int,
+        total: int,
     ) -> _ItemOutcome:
         """Resume or execute every substage for one curated item."""
 
         job = self.state.load_generation_job(item.item_id)
         analysis = job.analysis if job is not None else None
         if analysis is None:
+            self._emit_item(
+                "분석 중",
+                item,
+                position=position,
+                total=total,
+                status="running",
+            )
             try:
                 analysis = await self.llm.analyze(item)
             except Exception as exc:
                 raise ItemGenerationError("analysis", type(exc).__name__) from exc
             self.state.save_generation_analysis(
                 item.item_id, analysis, model=self.llm.model_name, at=now
+            )
+            self._emit_item(
+                "분석 완료",
+                item,
+                position=position,
+                total=total,
+                status="completed",
+            )
+        else:
+            self._emit_item(
+                "분석 결과 재사용",
+                item,
+                position=position,
+                total=total,
+                status="completed",
             )
 
         script: str | None = None
@@ -237,6 +315,13 @@ class GenerateService:
                 revision_count = job.revision_count
 
         if script is None:
+            self._emit_item(
+                "스크립트 생성 중",
+                item,
+                position=position,
+                total=total,
+                status="running",
+            )
             try:
                 draft = await self.llm.draft(item, analysis)
             except Exception as exc:
@@ -250,6 +335,14 @@ class GenerateService:
             ):
                 direction: Literal["expand", "shorten"] = (
                     "expand" if estimate.classification == "short" else "shorten"
+                )
+                self._emit_item(
+                    "스크립트 길이 보정 중",
+                    item,
+                    position=position,
+                    total=total,
+                    status="running",
+                    detail=f"{revision_count + 1}/{self.timing.max_revisions}",
                 )
                 try:
                     revision = await self.llm.revise(
@@ -282,6 +375,14 @@ class GenerateService:
                 model=self.llm.model_name,
                 at=now,
             )
+            self._emit_item(
+                "스크립트 길이 실패",
+                item,
+                position=position,
+                total=total,
+                status="failed",
+                detail=f"예상 {estimate.seconds:.1f}초",
+            )
             return _ItemOutcome(status="duration_failed")
 
         self.state.save_generation_script(
@@ -291,15 +392,45 @@ class GenerateService:
             revision_count=revision_count,
             at=now,
         )
+        self._emit_item(
+            "스크립트 생성 완료",
+            item,
+            position=position,
+            total=total,
+            status="completed",
+            detail=f"예상 {estimate.seconds:.1f}초",
+        )
 
         ranked_titles: list[JudgedTitle] | None = None
         try:
             if not self.gpt_title_ranking:
+                self._emit_item(
+                    "제목 생성 중",
+                    item,
+                    position=position,
+                    total=total,
+                    status="running",
+                )
                 titles = await self.llm.title(item, analysis, script)
                 titles = validate_title_package(titles, script)
             else:
+                self._emit_item(
+                    "제목 후보 생성 중",
+                    item,
+                    position=position,
+                    total=total,
+                    status="running",
+                )
                 pool = await self.llm.title_pool(item, analysis, script)
                 pool = validate_title_pool(pool, script)
+                self._emit_item(
+                    "제목 심사 중",
+                    item,
+                    position=position,
+                    total=total,
+                    status="running",
+                    detail="후보 5개",
+                )
                 judgment = await self.llm.judge_titles(
                     item, analysis, script, pool
                 )
@@ -319,6 +450,14 @@ class GenerateService:
                 error=type(exc).__name__,
                 model=self.llm.model_name,
                 at=now,
+            )
+            self._emit_item(
+                "제목 생성 실패",
+                item,
+                position=position,
+                total=total,
+                status="failed",
+                detail=type(exc).__name__,
             )
             return _ItemOutcome(status="title_failed")
         except Exception as exc:
@@ -354,4 +493,36 @@ class GenerateService:
             model=self.llm.model_name,
             generated_at=now,
         )
+        self._emit_item(
+            "제목 생성 완료",
+            item,
+            position=position,
+            total=total,
+            status="completed",
+            detail=f"선정: {titles.selected_title}",
+        )
         return _ItemOutcome(status="completed", generated=generated, titles=titles)
+
+    def _emit_item(
+        self,
+        message: str,
+        item: CuratedItem,
+        *,
+        position: int,
+        total: int,
+        status: Literal["running", "completed", "failed"],
+        detail: str | None = None,
+    ) -> None:
+        """Publish one Stage 3 item transition with stable positioning."""
+
+        item_detail = item.item_id if detail is None else f"{item.item_id} · {detail}"
+        self.progress.emit(
+            ProgressEvent(
+                stage="generate",
+                status=status,
+                message=message,
+                current=position,
+                total=total,
+                detail=item_detail,
+            )
+        )

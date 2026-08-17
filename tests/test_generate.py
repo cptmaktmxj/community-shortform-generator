@@ -20,6 +20,7 @@ from community_shorts.generation_models import (
     TitlePackage,
 )
 from community_shorts.models import CuratedItem
+from community_shorts.progress import ProgressEvent
 from community_shorts.state import StateStore
 from community_shorts.storage import ArtifactStore
 from tests.test_storage import make_curated, make_generated
@@ -211,6 +212,18 @@ class FailingGenerationLlm(RecordingGenerationLlm):
         raise RuntimeError("provider unavailable")
 
 
+class RecordingProgress:
+    """Collect Stage 3 analysis, script, and title transitions."""
+
+    def __init__(self) -> None:
+        self.events: list[ProgressEvent] = []
+
+    def emit(self, event: ProgressEvent) -> None:
+        """Record one progress event."""
+
+        self.events.append(event)
+
+
 class MostlyUnsafeTitleLlm(RecordingGenerationLlm):
     """Return fewer than three safe title reviews."""
 
@@ -241,7 +254,11 @@ class MostlyUnsafeTitleLlm(RecordingGenerationLlm):
 
 
 def prepared_service(
-    tmp_path: Path, llm: RecordingGenerationLlm, *, gpt_title_ranking: bool = False
+    tmp_path: Path,
+    llm: RecordingGenerationLlm,
+    *,
+    gpt_title_ranking: bool = False,
+    progress=None,
 ) -> GenerateService:
     """Create a service with one current curated item."""
 
@@ -253,6 +270,7 @@ def prepared_service(
         llm,
         timing(),
         gpt_title_ranking=gpt_title_ranking,
+        progress=progress,
     )
 
 
@@ -355,6 +373,36 @@ async def test_experimental_ranker_uses_five_candidates_and_persists_top_three(
     assert len(generated.title_candidates) == 3
     assert generated.title_ranking is not None
     assert generated.title_ranking[0].clickbait_strength == 0.90
+
+
+@pytest.mark.asyncio
+async def test_generate_reports_analysis_script_and_title_state_changes(
+    tmp_path: Path,
+) -> None:
+    """Catch expensive Stage 3 substages running without visible progress."""
+
+    progress = RecordingProgress()
+    service = prepared_service(
+        tmp_path,
+        RecordingGenerationLlm(script=ideal_length_script()),
+        gpt_title_ranking=True,
+        progress=progress,
+    )
+
+    await service.run(NOW)
+
+    messages = [event.message for event in progress.events]
+    assert messages == [
+        "대본·제목 생성 시작",
+        "분석 중",
+        "분석 완료",
+        "스크립트 생성 중",
+        "스크립트 생성 완료",
+        "제목 후보 생성 중",
+        "제목 심사 중",
+        "제목 생성 완료",
+        "전체 생성 완료",
+    ]
 
 
 @pytest.mark.asyncio
