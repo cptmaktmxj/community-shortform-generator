@@ -1,6 +1,6 @@
 # Community Shortform Generator
 
-커뮤니티 신규 글과 댓글을 수집하고, 반응·자극도·대중성을 기준으로 선별해 한국어로 요약한 뒤 한국어 숏폼 대본과 제목을 생성하는 Stage 1–3 파이프라인입니다. 게시 자동화는 포함하지 않습니다.
+커뮤니티 신규 글과 댓글을 수집하고, 반응·자극도·대중성을 기준으로 선별해 한국어로 요약한 뒤 한국어 숏폼 대본과 제목을 생성하는 파이프라인입니다. 게시 자동화는 포함하지 않습니다.
 
 ## 지원 소스
 
@@ -47,7 +47,7 @@ python -m community_shorts curate --llm-mode fixture
 python -m community_shorts generate --llm-mode fixture
 ```
 
-Stage 3의 기본 제목 모드는 `gpt-ranked`입니다. `gpt-5.4-mini`가 대본 기반 후보 5개를 만든 다음 별도의 구조화된 심사 호출이 근거성·클릭베이트 강도·대중성·safety-ok를 평가합니다. 로컬 하드 게이트를 통과한 상위 3개만 저장되며, 3개 미만이면 해당 항목은 `title_failed`가 됩니다. 실제 OpenAI 호출에는 `.env`의 `OPENAI_API_KEY`가 필요합니다.
+제목 생성의 기본 모드는 `gpt-ranked`입니다. `gpt-5.4-mini`가 대본 기반 후보 5개를 만든 다음 별도의 구조화된 심사 호출이 근거성·클릭베이트 강도·대중성·safety-ok를 평가합니다. 로컬 하드 게이트를 통과한 상위 3개만 저장되며, 3개 미만이면 해당 항목은 `title_failed`가 됩니다. 실제 OpenAI 호출에는 `.env`의 `OPENAI_API_KEY`가 필요합니다.
 
 ```powershell
 python -m community_shorts generate --model gpt-5.4-mini --title-mode gpt-ranked

@@ -1,4 +1,4 @@
-"""Command-line entry point for Stage 1 and Stage 2."""
+"""Command-line entry point for collection, curation, and generation."""
 
 import argparse
 import asyncio
@@ -17,14 +17,16 @@ from community_shorts.adapters import build_adapter
 from community_shorts.config import ConfigError, load_app_config, load_sources
 from community_shorts.curate import CurateService
 from community_shorts.generate import GenerateService
-from community_shorts.generation_llm import (
+from community_shorts.llm import (
     FixtureGenerationLlmClient,
+    FixtureLlmClient,
     OpenAiGenerationLlmClient,
     OpenAiResponsesTransport,
+    OpenAiChatTransport,
+    OpenAiLlmClient,
 )
 from community_shorts.http import HttpClient
 from community_shorts.ingest import IngestService
-from community_shorts.llm import FixtureLlmClient, OpenAiChatTransport, OpenAiLlmClient
 from community_shorts.progress import ConsoleProgress
 from community_shorts.state import StateStore
 from community_shorts.storage import ArtifactStore
@@ -35,7 +37,7 @@ SEOUL = ZoneInfo("Asia/Seoul")
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Create Stage 1 through Stage 3 pipeline command parsers."""
+    """Create collection, curation, and generation command parsers."""
 
     parser = argparse.ArgumentParser(
         prog="community-shorts",
@@ -43,10 +45,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
     for command, help_text in (
-        ("ingest", "Stage 1 신규 글과 댓글 수집"),
-        ("curate", "Stage 2 선별 및 한국어 요약"),
-        ("run", "Stage 1과 Stage 2 순차 실행"),
-        ("generate", "Stage 3 분석·대본·제목 생성"),
+        ("ingest", "신규 글과 댓글 수집"),
+        ("curate", "선별 및 한국어 요약"),
+        ("run", "수집과 선별 순차 실행"),
+        ("generate", "분석·대본·제목 생성"),
     ):
         subparser = subparsers.add_parser(command, help=help_text)
         _add_common_arguments(subparser)
@@ -140,7 +142,7 @@ async def _execute(args: argparse.Namespace) -> int:
             generation_llm = FixtureGenerationLlmClient()
         else:
             if not args.llm_api_key:
-                raise ConfigError("OPENAI_API_KEY is required for Stage 3 generation")
+                raise ConfigError("OPENAI_API_KEY is required for content generation")
             generation_llm = OpenAiGenerationLlmClient(
                 transport=OpenAiResponsesTransport(
                     base_url=args.base_url,

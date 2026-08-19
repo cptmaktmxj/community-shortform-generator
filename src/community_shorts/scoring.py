@@ -65,7 +65,7 @@ def passes_gates(
     fidelity: float,
     safety_ok: bool,
 ) -> bool:
-    """Require combined quality and every independent Stage 2 threshold."""
+    """Require combined quality and every independent curation threshold."""
 
     return (
         safety_ok

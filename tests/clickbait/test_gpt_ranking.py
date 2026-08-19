@@ -1,7 +1,7 @@
 import pytest
 
 from community_shorts.clickbait.ranking import select_judged_titles
-from community_shorts.generation_models import (
+from community_shorts.models import (
     TitleCandidateEvaluation,
     TitleJudgeResult,
 )

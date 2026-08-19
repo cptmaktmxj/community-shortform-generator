@@ -2,8 +2,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from community_shorts.generation_models import ContentAnalysis, GeneratedScript
-from community_shorts.models import CuratedItem, RawItem
+from community_shorts.models import ContentAnalysis, CuratedItem, GeneratedScript, RawItem
 from community_shorts.storage import ArtifactStore
 
 

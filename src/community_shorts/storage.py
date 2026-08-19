@@ -1,4 +1,4 @@
-"""Atomic JSON artifact storage for pipeline stage boundaries."""
+"""Atomic JSON artifact storage for pipeline feature boundaries."""
 
 import json
 import os
@@ -8,15 +8,14 @@ from typing import Sequence, TypeVar
 
 from pydantic import BaseModel
 
-from community_shorts.generation_models import GeneratedScript
-from community_shorts.models import CuratedItem, RawItem
+from community_shorts.models import CuratedItem, GeneratedScript, RawItem
 
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
 
 class ArtifactStore:
-    """Read and atomically replace Stage 1 and Stage 2 JSON artifacts."""
+    """Read and atomically replace collection, curation, and script artifacts."""
 
     def __init__(self, root: Path) -> None:
         self.root = root
@@ -25,36 +24,36 @@ class ArtifactStore:
         self.scripts_path = root / "scripts.json"
 
     def read_items(self) -> list[RawItem]:
-        """Read the current Stage 1 artifact, returning an empty list if absent."""
+        """Read collected items, returning an empty list if absent."""
 
         return self._read_models(self.items_path, RawItem)
 
     def write_items(self, items: Sequence[RawItem]) -> None:
-        """Merge items by ID and atomically replace the Stage 1 artifact."""
+        """Merge items by ID and atomically replace the collection artifact."""
 
         merged = {item.item_id: item for item in self.read_items()}
         merged.update({item.item_id: item for item in items})
         self._write_models(self.items_path, [merged[key] for key in sorted(merged)])
 
     def read_curated(self) -> list[CuratedItem]:
-        """Read the current Stage 2 artifact, returning an empty list if absent."""
+        """Read curated items, returning an empty list if absent."""
 
         return self._read_models(self.curated_path, CuratedItem)
 
     def write_curated(self, items: Sequence[CuratedItem]) -> None:
-        """Merge curated items by ID and atomically replace the Stage 2 artifact."""
+        """Merge curated items by ID and atomically replace the curation artifact."""
 
         merged = {item.item_id: item for item in self.read_curated()}
         merged.update({item.item_id: item for item in items})
         self._write_models(self.curated_path, [merged[key] for key in sorted(merged)])
 
     def replace_curated(self, items: Sequence[CuratedItem]) -> None:
-        """Atomically replace the complete Stage 2 artifact without merging."""
+        """Atomically replace the complete curation artifact without merging."""
 
         self._write_models(self.curated_path, sorted(items, key=lambda item: item.item_id))
 
     def read_scripts(self) -> list[GeneratedScript]:
-        """Read completed Stage 3 scripts, returning an empty list if absent."""
+        """Read completed scripts, returning an empty list if absent."""
 
         return self._read_models(self.scripts_path, GeneratedScript)
 
@@ -66,7 +65,7 @@ class ArtifactStore:
         self._write_models(self.scripts_path, [merged[key] for key in sorted(merged)])
 
     def replace_scripts(self, items: Sequence[GeneratedScript]) -> None:
-        """Atomically replace every completed Stage 3 script without merging."""
+        """Atomically replace every completed script without merging."""
 
         self._write_models(self.scripts_path, sorted(items, key=lambda item: item.item_id))
 

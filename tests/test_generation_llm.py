@@ -4,14 +4,14 @@ from typing import Any
 
 import pytest
 
-import community_shorts.generation_llm as generation_llm_module
-from community_shorts.generation_llm import (
+import community_shorts.llm as llm_module
+from community_shorts.llm import (
     FixtureGenerationLlmClient,
     GenerationResponseError,
     OpenAiGenerationLlmClient,
     OpenAiResponsesTransport,
 )
-from community_shorts.generation_models import (
+from community_shorts.models import (
     ContentAnalysis,
     ScriptDraft,
     TitleCandidate,
@@ -257,7 +257,7 @@ async def test_openai_transport_uses_responses_parse_and_pydantic_schema(
             captured["client_options"] = kwargs
             self.responses = FakeResponses()
 
-    monkeypatch.setattr(generation_llm_module, "AsyncOpenAI", FakeOpenAI)
+    monkeypatch.setattr(llm_module, "AsyncOpenAI", FakeOpenAI)
     transport = OpenAiResponsesTransport(
         base_url="https://api.openai.com/v1",
         api_key="test",

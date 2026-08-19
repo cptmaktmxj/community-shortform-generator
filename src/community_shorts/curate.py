@@ -1,4 +1,4 @@
-"""Stage 2 orchestration for selection and Korean summarization."""
+"""Orchestration for selection and Korean summarization."""
 
 import logging
 from dataclasses import dataclass
@@ -18,7 +18,7 @@ LOGGER = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class CurateReport:
-    """Observable outcome of one Stage 2 run."""
+    """Observable outcome of one curation run."""
 
     evaluated: int
     passed: int
@@ -198,7 +198,7 @@ class CurateService:
                 )
             )
             raise RebuildIncompleteError(
-                f"Stage 2 rebuild failed for {len(failed_item_ids)} candidate(s)"
+                f"Curation rebuild failed for {len(failed_item_ids)} candidate(s)"
             )
         if candidates and len(failed_item_ids) == len(candidates):
             self._progress.emit(

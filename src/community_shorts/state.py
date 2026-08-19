@@ -7,12 +7,12 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Iterator, Literal, Mapping, Sequence
 
-from community_shorts.generation_models import (
+from community_shorts.models import (
     ContentAnalysis,
     GenerationJob,
+    RawItem,
     TitlePackage,
 )
-from community_shorts.models import RawItem
 
 
 class StateStore:
@@ -83,7 +83,7 @@ class StateStore:
         return {str(row["item_id"]) for row in rows}
 
     def mark_ingested(self, items: Sequence[RawItem], *, at: datetime) -> None:
-        """Record items only after their Stage 1 artifact has been written."""
+        """Record items only after their collection artifact has been written."""
 
         rows = [(item.item_id, item.source_id, at.isoformat(), "ingested") for item in items]
         with self._connect() as connection:
@@ -108,7 +108,7 @@ class StateStore:
             )
 
     def mark_safety_rejected(self, item_id: str, *, at: datetime, reason: str) -> None:
-        """Persist a terminal Stage 2 safety decision without counting it as curated."""
+        """Persist a terminal safety decision without counting it as curated."""
 
         with self._connect() as connection:
             connection.execute(
@@ -127,7 +127,7 @@ class StateStore:
         safety_rejections: Mapping[str, str],
         at: datetime,
     ) -> None:
-        """Replace terminal Stage 2 states after a successful rebuild write."""
+        """Replace terminal curation states after a successful rebuild write."""
 
         with self._connect() as connection:
             connection.execute(
@@ -165,7 +165,7 @@ class StateStore:
         return int(row["count"] if row else 0)
 
     def curated_ids(self) -> set[str]:
-        """Return item IDs already selected into the Stage 2 artifact."""
+        """Return item IDs already selected into the curated artifact."""
 
         with self._connect() as connection:
             rows = connection.execute(
@@ -186,7 +186,7 @@ class StateStore:
         return {str(row["item_id"]) for row in rows}
 
     def load_generation_job(self, item_id: str) -> GenerationJob | None:
-        """Load and validate one resumable Stage 3 checkpoint."""
+        """Load and validate one resumable generation checkpoint."""
 
         with self._connect() as connection:
             row = connection.execute(
@@ -225,7 +225,7 @@ class StateStore:
         model: str,
         at: datetime,
     ) -> None:
-        """Upsert validated analysis and clear all later Stage 3 substages."""
+        """Upsert validated analysis and clear all later generation subtasks."""
 
         with self._connect() as connection:
             connection.execute(
@@ -287,7 +287,7 @@ class StateStore:
         model: str,
         at: datetime,
     ) -> None:
-        """Persist an allowed terminal Stage 3 failure without losing checkpoints."""
+        """Persist an allowed terminal generation failure without losing checkpoints."""
 
         allowed = {"duration_failed", "title_failed", "failed"}
         if status not in allowed:
@@ -325,7 +325,7 @@ class StateStore:
                 raise ValueError(f"generation job is missing for {item_id}")
 
     def reset_generation_jobs(self, item_ids: Sequence[str]) -> None:
-        """Delete Stage 3 checkpoints only for the explicitly supplied IDs."""
+        """Delete generation checkpoints only for the explicitly supplied IDs."""
 
         if not item_ids:
             return

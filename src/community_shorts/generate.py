@@ -1,4 +1,4 @@
-"""Resumable Stage 3 orchestration for analysis, narration, and titles."""
+"""Resumable orchestration for analysis, narration, and titles."""
 
 import logging
 from dataclasses import dataclass
@@ -9,19 +9,19 @@ from community_shorts.clickbait.ranking import JudgedTitle, select_judged_titles
 
 from community_shorts.config import ScriptTimingConfig
 from community_shorts.duration import DurationEstimate, estimate_duration
-from community_shorts.generation_llm import (
+from community_shorts.llm import (
     GenerationLlmClient,
     GenerationResponseError,
 )
-from community_shorts.generation_models import (
+from community_shorts.models import (
     ContentAnalysis,
+    CuratedItem,
     GeneratedScript,
     TitleCandidate,
     TitleCandidatePool,
     TitlePackage,
     TitleRankingScore,
 )
-from community_shorts.models import CuratedItem
 from community_shorts.progress import NullProgress, ProgressEvent, ProgressSink
 from community_shorts.state import StateStore
 from community_shorts.storage import ArtifactStore
@@ -51,7 +51,7 @@ class ItemGenerationError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class GenerateReport:
-    """Counts from one Stage 3 execution."""
+    """Counts from one content-generation execution."""
 
     attempted: int
     completed: int
@@ -122,7 +122,7 @@ def _validate_title_candidates(
 
 
 class GenerateService:
-    """Execute and resume Stage 3 in the approved substage order."""
+    """Execute and resume generation in the approved subtask order."""
 
     def __init__(
         self,
@@ -199,7 +199,7 @@ class GenerateService:
                     completed.append((outcome.generated, outcome.titles))
             except ItemGenerationError as exc:
                 LOGGER.error(
-                    "Stage 3 item %s failed during %s (%s)",
+                    "Generation item %s failed during %s (%s)",
                     item.item_id,
                     exc.substage,
                     exc.cause_type,
@@ -238,7 +238,7 @@ class GenerateService:
                     detail=f"실패 {len(failed_ids)}개",
                 )
             )
-            raise RuntimeError("All Stage 3 generations failed")
+            raise RuntimeError("All content generations failed")
 
         report = GenerateReport(
             attempted=attempted,
@@ -513,7 +513,7 @@ class GenerateService:
         status: Literal["running", "completed", "failed"],
         detail: str | None = None,
     ) -> None:
-        """Publish one Stage 3 item transition with stable positioning."""
+        """Publish one generation item transition with stable positioning."""
 
         item_detail = item.item_id if detail is None else f"{item.item_id} · {detail}"
         self.progress.emit(

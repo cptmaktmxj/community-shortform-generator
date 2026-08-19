@@ -10,7 +10,7 @@ from community_shorts.generate import (
     TitleValidationError,
     validate_title_package,
 )
-from community_shorts.generation_models import (
+from community_shorts.models import (
     ContentAnalysis,
     ScriptDraft,
     TitleCandidate,
@@ -459,7 +459,7 @@ async def test_failed_rebuild_preserves_previous_scripts(tmp_path: Path) -> None
         timing(),
     )
 
-    with pytest.raises(RuntimeError, match="All Stage 3 generations failed"):
+    with pytest.raises(RuntimeError, match="All content generations failed"):
         await service.run(NOW, rebuild=True)
 
     assert [item.item_id for item in store.read_scripts()] == ["geeknews:old"]

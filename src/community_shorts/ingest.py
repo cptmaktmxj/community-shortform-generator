@@ -1,4 +1,4 @@
-"""Stage 1 orchestration for isolated source ingestion."""
+"""Orchestration for isolated source ingestion."""
 
 import logging
 import uuid
@@ -18,7 +18,7 @@ LOGGER = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class IngestReport:
-    """Observable outcome of one Stage 1 run."""
+    """Observable outcome of one ingestion run."""
 
     collected: int
     skipped_seen: int

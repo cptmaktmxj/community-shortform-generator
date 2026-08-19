@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from community_shorts.generation_models import ContentAnalysis, TitleCandidate, TitlePackage
+from community_shorts.models import ContentAnalysis, TitleCandidate, TitlePackage
 from community_shorts.state import StateStore
 from tests.test_storage import make_item
 

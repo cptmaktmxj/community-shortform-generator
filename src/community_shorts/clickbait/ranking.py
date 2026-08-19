@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from community_shorts.generation_models import TitleJudgeResult
+from community_shorts.models import TitleJudgeResult
 
 
 @dataclass(frozen=True, slots=True)

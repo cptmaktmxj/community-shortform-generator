@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from community_shorts.generation_models import (
+from community_shorts.models import (
     ContentAnalysis,
     GeneratedScript,
     TitleCandidate,
